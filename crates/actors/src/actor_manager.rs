@@ -53,11 +53,11 @@ impl ActorsManager {
                         info!("ActorWorker {_index} finished : {s}")
                     }
                     Err(e) => {
-                        error!("ActorWorker {_index} error : {e}")
+                        error!("ActorWorker {_index} error : {e:?}")
                     }
                 },
                 Err(e) => {
-                    error!("ActorWorker join error {_index} : {e}")
+                    error!("ActorWorker join error {_index} : {e:?}")
                 }
             }
             f_remaining_futures = remaining_futures;

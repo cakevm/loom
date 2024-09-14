@@ -76,7 +76,7 @@ pub async fn new_block_history_worker(
                         match block_history.write().await.add_block(block.clone()) {
                             Ok(_) => {
                                 latest_block.write().await.update(block_number, block_hash, None, Some(block.clone()), None, None );
-                                sender.send(MarketEvents::BlockTxUpdate{ block_number, block_hash}).await.unwrap();
+                                sender.send(MarketEvents::BlockTxUpdate{ block_number, block_hash}).await?;
                             }
                             Err(e)=>{
                                 error!("block_update add_block error {} {} {} ", e, block_number, block_hash);

@@ -14,7 +14,6 @@ env:
 
 jobs:
   test:
-    if: github.repository == 'dexloom/loom'
     name: make test
     runs-on: ubuntu-latest
     env:
@@ -33,7 +32,6 @@ jobs:
       - run: 'echo "pub const KEY_ENCRYPTION_PWD: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];" > crates/defi-entities/src/private.rs'
       - run: make test
   fmt:
-    if: github.repository == 'dexloom/loom'
     name: make fmt-check
     runs-on: ubuntu-latest
     steps:
@@ -44,7 +42,6 @@ jobs:
       - run: make fmt-check
 
   clippy:
-    if: github.repository == 'dexloom/loom'
     name: make clippy
     runs-on: ubuntu-latest
     steps:

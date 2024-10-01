@@ -1,11 +1,12 @@
 use defi_blockchain::Blockchain;
 use defi_entities::{Market, MarketState, PoolClass, RethAdapter};
-use defi_pools::{PoolsConfig, UniswapV2Pool};
+use defi_pools::{PoolsConfig, Slot0, UniswapV2Pool, UniswapV3Pool};
 use eyre::eyre;
 use log::info;
 use loom_actors::{Actor, ActorResult, SharedState, WorkerResult};
 use loom_actors_macros::Accessor;
-use reth_direct_db_uniswap_storage::{UniV2Factory, UniV3PositionManager, UNI_V2_FACTORY, UNI_V3_POSITION_MANAGER};
+use reth_direct_db_uniswap_storage::univ2::{UniV2Factory, UNI_V2_FACTORY};
+use reth_direct_db_uniswap_storage::univ3::{UniV3PositionManager, UNI_V3_FACTORY, UNI_V3_POSITION_MANAGER};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
 use std::time::Instant;
 
@@ -50,9 +51,26 @@ where
 
         let now = Instant::now();
         let mut market_state_read_guard = market.write().await;
-        for pool in position_manager.pools {
-            // TODO: Load pool ticks, etc
-            market_state_read_guard.add_empty_pool(&pool.address)?;
+        for (pool, slot0) in position_manager.pools {
+            let slot0 = Slot0 {
+                sqrt_price_x96: slot0.sqrt_price_x96.to(),
+                tick: slot0.tick.as_i32(),
+                observation_index: slot0.observation_index.to(),
+                observation_cardinality: slot0.observation_cardinality.to(),
+                observation_cardinality_next: slot0.observation_cardinality_next.to(),
+                fee_protocol: slot0.fee_protocol,
+                unlocked: slot0.unlocked,
+            };
+
+            market_state_read_guard.add_pool(UniswapV3Pool::new_with_data(
+                pool.address,
+                pool.token0,
+                pool.token1,
+                0,
+                0,
+                Some(slot0),
+                UNI_V3_FACTORY,
+            ))?;
         }
         drop(market_state_read_guard);
         let elapsed = now.elapsed();

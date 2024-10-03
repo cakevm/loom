@@ -14,7 +14,7 @@ env:
 
 jobs:
   test:
-    if: github.repository == 'dexloom/loom'
+    #if: github.repository == 'dexloom/loom'
     name: make test
     runs-on: ubuntu-latest
     env:
@@ -35,7 +35,7 @@ jobs:
       - run: make swap-test-all
 
   fmt:
-    if: github.repository == 'dexloom/loom'
+    #if: github.repository == 'dexloom/loom'
     name: make fmt-check
     runs-on: ubuntu-latest
     steps:
@@ -46,7 +46,7 @@ jobs:
       - run: make fmt-check
 
   clippy:
-    if: github.repository == 'dexloom/loom'
+    #if: github.repository == 'dexloom/loom'
     name: make clippy
     runs-on: ubuntu-latest
     steps:
@@ -59,7 +59,7 @@ jobs:
       - run: make clippy
 
   deny:
-    if: github.repository == 'dexloom/loom'
+    #if: github.repository == 'dexloom/loom'
     name: cargo deny
     runs-on: ubuntu-latest
     steps:

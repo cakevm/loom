@@ -36,7 +36,7 @@ fmt-check:
 
 # check licences
 .PHONY: deny-check
-fmt-check:
+deny-check:
 	cargo deny --all-features check
 
 

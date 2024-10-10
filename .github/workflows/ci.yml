@@ -64,6 +64,7 @@ jobs:
     if: github.repository == 'dexloom/loom'
     name: cargo deny check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v1

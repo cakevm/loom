@@ -192,6 +192,8 @@ reth-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "de07436"
 reth-provider = { git = "https://github.com/paradigmxyz/reth", rev = "de07436" }
 reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "de07436" }
 reth-rpc = { git = "https://github.com/paradigmxyz/reth", rev = "de07436" }
+reth-rpc-api = { git = "https://github.com/paradigmxyz/reth", rev = "de07436" }
+reth-rpc-eth-api = { git = "https://github.com/paradigmxyz/reth", rev = "de07436" }
 reth-rpc-types-compat = { git = "https://github.com/paradigmxyz/reth", rev = "de07436" }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth", rev = "de07436" }
 reth-testing-utils = { git = "https://github.com/paradigmxyz/reth", rev = "de07436" }

@@ -1,9 +1,11 @@
 use crate::arguments::{AppArgs, Command, LoomArgs};
-use alloy::providers::ProviderBuilder;
+use alloy::providers::{Provider, ProviderBuilder};
+use alloy::transports::http::reqwest::Url;
 use clap::{CommandFactory, FromArgMatches, Parser};
 use defi_actors::{mempool_worker, NodeBlockActorConfig};
 use defi_blockchain::Blockchain;
 use loom_topology::TopologyConfig;
+use loom_utils::RethNodeLayer;
 use reth::builder::engine_tree_config::TreeConfig;
 use reth::builder::EngineNodeLauncher;
 use reth::chainspec::EthereumChainSpecParser;
@@ -46,6 +48,11 @@ fn main() -> eyre::Result<()> {
                     builder.launch_with(launcher)
                 })
                 .await?;
+
+            let http_url = Url::parse(handle.node.config.rpc.http_addr.to_string().as_str())?;
+            let reth_node_provider = ProviderBuilder::new().layer(RethNodeLayer::new(handle.node.eth_api().clone())).on_http(http_url);
+            let b = reth_node_provider.get_block_number().await?;
+            println!("Block number: {:?}", b);
 
             let mempool = handle.node.pool.clone();
             let ipc_provider = ProviderBuilder::new().on_builtin(handle.node.config.rpc.ipcpath.as_str()).await?;

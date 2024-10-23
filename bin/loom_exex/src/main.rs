@@ -49,7 +49,7 @@ fn main() -> eyre::Result<()> {
                 })
                 .await?;
 
-            let http_url = Url::parse(handle.node.config.rpc.http_addr.to_string().as_str())?;
+            let http_url = Url::parse(format!("http://{}", handle.node.config.rpc.http_addr.to_string()).as_str())?;
             let reth_node_provider = ProviderBuilder::new().layer(RethNodeLayer::new(handle.node.eth_api().clone())).on_http(http_url);
             let b = reth_node_provider.get_block_number().await?;
             println!("Block number: {:?}", b);

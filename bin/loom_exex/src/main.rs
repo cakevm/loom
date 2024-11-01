@@ -9,6 +9,7 @@ use loom::evm::db::{AlloyDB, LoomDB};
 use loom::node::actor_config::NodeBlockActorConfig;
 use loom::node::exex::mempool_worker;
 use loom::types::entities::MarketState;
+use loom_defi_custom_pools::MarketPoolEnum;
 use reth::builder::engine_tree_config::TreeConfig;
 use reth::builder::EngineNodeLauncher;
 use reth::chainspec::{Chain, EthereumChainSpecParser};
@@ -37,7 +38,7 @@ fn main() -> eyre::Result<()> {
         Command::Node(_) => Cli::<EthereumChainSpecParser, LoomArgs>::parse().run(|builder, loom_args: LoomArgs| async move {
             let topology_config = TopologyConfig::load_from_file(loom_args.loom_config.clone())?;
 
-            let bc = Blockchain::new(builder.config().chain.chain.id());
+            let bc = Blockchain::<MarketPoolEnum>::new(builder.config().chain.chain.id());
             let bc_clone = bc.clone();
 
             let engine_tree_config = TreeConfig::default()
@@ -82,7 +83,7 @@ fn main() -> eyre::Result<()> {
                 let transport = WsConnect { url: client_config.url(), auth: None, config: None };
                 let client = ClientBuilder::default().ws(transport).await?;
                 let provider = ProviderBuilder::new().on_client(client).boxed();
-                let bc = Blockchain::new(Chain::mainnet().id());
+                let bc = Blockchain::<MarketPoolEnum>::new(Chain::mainnet().id());
                 let bc_clone = bc.clone();
 
                 if let Err(e) = loom_runtime::start_loom(provider, bc_clone, topology_config, loom_args.loom_config.clone(), false).await {

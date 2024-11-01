@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -11,7 +12,7 @@ use loom_evm_db::LoomDBType;
 use loom_types_blockchain::SwapError;
 
 use crate::swappath::SwapPath;
-use crate::{CalculationResult, PoolWrapper, SwapStep, Token};
+use crate::{CalculationResult, Pool, PoolEnumTrait, PoolWrapper, SwapStep, Token};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub enum SwapAmountType {
@@ -39,8 +40,8 @@ impl SwapAmountType {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct SwapLine {
-    pub path: SwapPath,
+pub struct SwapLine<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
+    pub path: SwapPath<PoolEnum>,
     /// Input token amount of the swap
     pub amount_in: SwapAmountType,
     /// Output token amount of the swap
@@ -53,7 +54,10 @@ pub struct SwapLine {
     pub gas_used: Option<u64>,
 }
 
-impl fmt::Display for SwapLine {
+impl<PoolEnum> fmt::Display for SwapLine<PoolEnum>
+where
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let token_in = self.tokens().first();
         let token_out = self.tokens().last();
@@ -104,26 +108,45 @@ impl fmt::Display for SwapLine {
     }
 }
 
-impl Hash for SwapLine {
+impl<PoolEnum> Hash for SwapLine<PoolEnum>
+where
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+{
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.tokens().hash(state);
         self.pools().hash(state);
     }
 }
 
-impl PartialEq for SwapLine {
+impl<PoolEnum> PartialEq for SwapLine<PoolEnum>
+where
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+{
     fn eq(&self, other: &Self) -> bool {
         self.tokens() == other.tokens() && self.pools() == other.pools()
     }
 }
 
-impl From<SwapPath> for SwapLine {
-    fn from(value: SwapPath) -> Self {
-        Self { path: value, ..Default::default() }
+impl<PoolEnum> From<SwapPath<PoolEnum>> for SwapLine<PoolEnum>
+where
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+{
+    fn from(value: SwapPath<PoolEnum>) -> Self {
+        Self {
+            path: value,
+            amount_in: Default::default(),
+            amount_out: Default::default(),
+            calculation_results: vec![],
+            swap_to: None,
+            gas_used: None,
+        }
     }
 }
 
-impl SwapLine {
+impl<PoolEnum> SwapLine<PoolEnum>
+where
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+{
     pub fn to_error(&self, msg: String) -> SwapError {
         SwapError {
             msg,
@@ -136,11 +159,18 @@ impl SwapLine {
     }
 
     pub fn new() -> Self {
-        SwapLine::default()
+        SwapLine::<PoolEnum> {
+            path: SwapPath { tokens: vec![], pools: vec![] },
+            amount_in: Default::default(),
+            amount_out: Default::default(),
+            calculation_results: vec![],
+            swap_to: None,
+            gas_used: None,
+        }
     }
 
     /// Check if the path contains a specific pool
-    pub fn contains_pool(&self, pool: &PoolWrapper) -> bool {
+    pub fn contains_pool(&self, pool: &PoolWrapper<PoolEnum>) -> bool {
         self.path.contains_pool(pool)
     }
 
@@ -150,7 +180,7 @@ impl SwapLine {
     }
 
     /// Get all used pools in the swap line
-    pub fn pools(&self) -> &Vec<PoolWrapper> {
+    pub fn pools(&self) -> &Vec<PoolWrapper<PoolEnum>> {
         &self.path.pools
     }
 
@@ -165,19 +195,19 @@ impl SwapLine {
     }
 
     /// Get the first pool in the swap line
-    pub fn get_first_pool(&self) -> Option<&PoolWrapper> {
+    pub fn get_first_pool(&self) -> Option<&PoolWrapper<PoolEnum>> {
         self.pools().first()
     }
 
     /// Get the last pool in the swap line
-    pub fn get_last_pool(&self) -> Option<&PoolWrapper> {
+    pub fn get_last_pool(&self) -> Option<&PoolWrapper<PoolEnum>> {
         self.pools().last()
     }
 
     /// Convert the swap line to two swap steps for flash swapping
-    pub fn to_swap_steps(&self, multicaller: Address) -> Option<(SwapStep, SwapStep)> {
-        let mut sp0: Option<SwapLine> = None;
-        let mut sp1: Option<SwapLine> = None;
+    pub fn to_swap_steps(&self, multicaller: Address) -> Option<(SwapStep<PoolEnum>, SwapStep<PoolEnum>)> {
+        let mut sp0: Option<SwapLine<PoolEnum>> = None;
+        let mut sp1: Option<SwapLine<PoolEnum>> = None;
 
         for i in 1..self.path.pool_count() {
             let (flash_path, inside_path) = self.split(i).unwrap();
@@ -206,7 +236,7 @@ impl SwapLine {
     }
 
     /// Split the swap line into two swap lines at a specific pool index
-    pub fn split(&self, pool_index: usize) -> Result<(SwapLine, SwapLine)> {
+    pub fn split(&self, pool_index: usize) -> Result<(SwapLine<PoolEnum>, SwapLine<PoolEnum>)> {
         let first = SwapLine {
             path: SwapPath::new(self.tokens()[0..pool_index + 1].to_vec(), self.pools()[0..pool_index].to_vec()),
             amount_in: self.amount_in,
@@ -497,7 +527,7 @@ mod tests {
     use loom_defi_address_book::{TokenAddress, UniswapV2PoolAddress, UniswapV3PoolAddress};
     use std::sync::Arc;
 
-    fn default_swap_line() -> (MockPool, MockPool, SwapLine) {
+    fn default_swap_line<PoolEnum>() -> (MockPool, MockPool, SwapLine<PoolEnum>) {
         let token0 = Arc::new(Token::new_with_data(TokenAddress::WETH, Some("WETH".to_string()), None, Some(18), true, false));
         let token1 = Arc::new(Token::new_with_data(TokenAddress::USDT, Some("USDT".to_string()), None, Some(6), true, false));
         let pool1 = MockPool { token0: TokenAddress::WETH, token1: TokenAddress::USDT, address: UniswapV3PoolAddress::WETH_USDT_3000 };

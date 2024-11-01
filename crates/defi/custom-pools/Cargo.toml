@@ -1,5 +1,5 @@
 [package]
-name = "loom-rpc-state"
+name = "loom-defi-custom-pools"
 edition.workspace = true
 exclude.workspace = true
 homepage.workspace = true
@@ -9,7 +9,11 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-loom-core-blockchain.workspace = true
-loom-evm-utils.workspace = true
-loom-storage-db.workspace = true
+loom-defi-pools.workspace = true
+loom-evm-db.workspace = true
 loom-types-entities.workspace = true
+
+alloy-primitives.workspace = true
+enum_delegate.workspace = true
+eyre.workspace = true
+revm.workspace = true

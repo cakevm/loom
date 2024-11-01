@@ -3,13 +3,16 @@ use alloy_primitives::{Address, BlockNumber, Bytes, U256};
 use eyre::{eyre, OptionExt, Result};
 use loom_types_blockchain::MulticallerCalls;
 use loom_types_entities::tips::{tips_and_value_for_swap_type, Tips};
-use loom_types_entities::{Swap, SwapEncoder, SwapStep};
+use loom_types_entities::{Pool, PoolEnumTrait, Swap, SwapEncoder, SwapStep};
+use std::fmt::{Debug, Display};
 use tracing::{debug, error, trace};
 
-impl SwapEncoder for MulticallerSwapEncoder {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> SwapEncoder<PoolEnum>
+    for MulticallerSwapEncoder
+{
     fn encode(
         &self,
-        swap: Swap,
+        swap: Swap<PoolEnum>,
         tips_pct: Option<u32>,
         _next_block_number: Option<BlockNumber>,
         gas_cost: Option<U256>,
@@ -21,7 +24,7 @@ impl SwapEncoder for MulticallerSwapEncoder {
                 vec![swap.to_swap_steps(self.swap_step_encoder.get_contract_address()).ok_or_eyre("SWAP_TYPE_NOTE_COVERED")?]
             }
             Swap::Multiple(swap_vec) => {
-                let mut ret: Vec<(SwapStep, SwapStep)> = Vec::new();
+                let mut ret: Vec<(SwapStep<PoolEnum>, SwapStep<PoolEnum>)> = Vec::new();
                 for s in swap_vec.iter() {
                     ret.push(s.to_swap_steps(self.swap_step_encoder.get_contract_address()).ok_or_eyre("AA")?);
                 }

@@ -11,6 +11,7 @@ repository.workspace = true
 loom-core-actors.workspace = true
 loom-core-actors-macros.workspace = true
 loom-core-blockchain.workspace = true
+loom-types-entities.workspace = true
 loom-types-events.workspace = true
 
 async-trait.workspace = true

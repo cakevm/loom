@@ -4,17 +4,18 @@ use loom_core_actors::{run_async, subscribe, Accessor, Actor, ActorResult, Broad
 use loom_core_actors_macros::{Accessor, Consumer, Producer};
 use loom_core_blockchain::Blockchain;
 use loom_types_blockchain::ChainParameters;
-use loom_types_entities::{BlockHistory, Market};
+use loom_types_entities::{BlockHistory, Market, Pool, PoolEnumTrait};
 use loom_types_events::{MarketEvents, StateUpdateEvent};
+use std::fmt::{Debug, Display};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::error;
 
-pub async fn block_state_change_worker(
+pub async fn block_state_change_worker<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
     chain_parameters: ChainParameters,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     block_history: SharedState<BlockHistory>,
     market_events_rx: Broadcaster<MarketEvents>,
-    state_updates_broadcaster: Broadcaster<StateUpdateEvent>,
+    state_updates_broadcaster: Broadcaster<StateUpdateEvent<PoolEnum>>,
 ) -> WorkerResult {
     subscribe!(market_events_rx);
 
@@ -81,20 +82,20 @@ pub async fn block_state_change_worker(
 }
 
 #[derive(Accessor, Consumer, Producer)]
-pub struct BlockStateChangeProcessorActor {
+pub struct BlockStateChangeProcessorActor<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     chain_parameters: ChainParameters,
     #[accessor]
-    market: Option<SharedState<Market>>,
+    market: Option<SharedState<Market<PoolEnum>>>,
     #[accessor]
     block_history: Option<SharedState<BlockHistory>>,
     #[consumer]
     market_events_rx: Option<Broadcaster<MarketEvents>>,
     #[producer]
-    state_updates_tx: Option<Broadcaster<StateUpdateEvent>>,
+    state_updates_tx: Option<Broadcaster<StateUpdateEvent<PoolEnum>>>,
 }
 
-impl BlockStateChangeProcessorActor {
-    pub fn new() -> BlockStateChangeProcessorActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> BlockStateChangeProcessorActor<PoolEnum> {
+    pub fn new() -> BlockStateChangeProcessorActor<PoolEnum> {
         BlockStateChangeProcessorActor {
             chain_parameters: ChainParameters::ethereum(),
             market: None,
@@ -104,7 +105,7 @@ impl BlockStateChangeProcessorActor {
         }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self {
             chain_parameters: bc.chain_parameters(),
             market: Some(bc.market()),
@@ -115,13 +116,17 @@ impl BlockStateChangeProcessorActor {
     }
 }
 
-impl Default for BlockStateChangeProcessorActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Default
+    for BlockStateChangeProcessorActor<PoolEnum>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Actor for BlockStateChangeProcessorActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Actor
+    for BlockStateChangeProcessorActor<PoolEnum>
+{
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(block_state_change_worker(
             self.chain_parameters.clone(),

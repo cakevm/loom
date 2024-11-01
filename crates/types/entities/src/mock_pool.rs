@@ -4,7 +4,13 @@ use alloy_primitives::{Address, U256};
 use eyre::ErrReport;
 use eyre::Result;
 use loom_evm_db::LoomDB;
+use loom_evm_db::LoomDBType;
 use revm::primitives::Env;
+
+#[enum_delegate::implement(Pool)]
+pub enum MockPoolEnum {
+    MockPool(MockPool),
+}
 
 #[derive(Clone)]
 pub struct MockPool {

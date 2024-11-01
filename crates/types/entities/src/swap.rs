@@ -1,20 +1,20 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
 use alloy_primitives::{Address, U256};
 
-use crate::{SwapAmountType, SwapLine, SwapStep, Token};
+use crate::{Pool, PoolEnumTrait, SwapAmountType, SwapLine, SwapStep, Token};
 
 #[derive(Clone, Debug)]
-pub enum Swap {
+pub enum Swap<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     None,
-    ExchangeSwapLine(SwapLine),
-    BackrunSwapSteps((SwapStep, SwapStep)),
-    BackrunSwapLine(SwapLine),
-    Multiple(Vec<Swap>),
+    ExchangeSwapLine(SwapLine<PoolEnum>),
+    BackrunSwapSteps((SwapStep<PoolEnum>, SwapStep<PoolEnum>)),
+    BackrunSwapLine(SwapLine<PoolEnum>),
+    Multiple(Vec<Swap<PoolEnum>>),
 }
 
-impl Display for Swap {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Display for Swap<PoolEnum> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Swap::ExchangeSwapLine(path) => write!(f, "{path}"),
@@ -26,12 +26,12 @@ impl Display for Swap {
     }
 }
 
-impl Swap {
-    pub fn to_swap_steps(self: &Swap, multicaller: Address) -> Option<(SwapStep, SwapStep)> {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Swap<PoolEnum> {
+    pub fn to_swap_steps(self: &Swap<PoolEnum>, multicaller: Address) -> Option<(SwapStep<PoolEnum>, SwapStep<PoolEnum>)> {
         match self {
             Swap::BackrunSwapLine(swap_line) => {
-                let mut sp0: Option<SwapLine> = None;
-                let mut sp1: Option<SwapLine> = None;
+                let mut sp0: Option<SwapLine<PoolEnum>> = None;
+                let mut sp1: Option<SwapLine<PoolEnum>> = None;
 
                 for i in 1..swap_line.path.pool_count() {
                     let (flash_path, inside_path) = swap_line.split(i).unwrap();

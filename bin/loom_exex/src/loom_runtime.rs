@@ -14,24 +14,25 @@ use loom::node::exex::loom_exex;
 use loom::storage::db::init_db_pool;
 use loom::strategy::backrun::{BackrunConfig, BackrunConfigSection};
 use loom::types::entities::config::load_from_file;
-use loom::types::entities::PoolClass;
+use loom::types::entities::{Pool, PoolClass, PoolEnumTrait};
 use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
 use std::env;
+use std::fmt::{Debug, Display};
 use std::future::Future;
 use tracing::info;
 
-pub async fn init<Node: FullNodeComponents>(
+pub async fn init<Node: FullNodeComponents, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
     ctx: ExExContext<Node>,
-    bc: Blockchain,
+    bc: Blockchain<PoolEnum>,
     config: NodeBlockActorConfig,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
     Ok(loom_exex(ctx, bc, config.clone()))
 }
 
-pub async fn start_loom<P, T>(
+pub async fn start_loom<P, T, PoolEnum>(
     provider: P,
-    bc: Blockchain,
+    bc: Blockchain<PoolEnum>,
     topology_config: TopologyConfig,
     loom_config_filepath: String,
     is_exex: bool,
@@ -39,6 +40,7 @@ pub async fn start_loom<P, T>(
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + DebugProviderExt<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     let chain_id = provider.get_chain_id().await?;
 

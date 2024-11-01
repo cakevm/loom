@@ -1,16 +1,17 @@
 use alloy_primitives::{Address, Bytes};
 use eyre::{eyre, OptionExt, Result};
+use std::fmt::{Debug, Display};
 use tracing::error;
 
 use loom_types_blockchain::MulticallerCalls;
-use loom_types_entities::Swap;
+use loom_types_entities::{Pool, PoolEnumTrait, Swap};
 
 use crate::SwapStepEncoder;
 
-pub trait MulticallerEncoder {
+pub trait MulticallerEncoder<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     fn encode_calls(&self, calls: MulticallerCalls) -> Result<(Address, Bytes)>;
     fn add_internal_calls(&self, opcodes: MulticallerCalls, inside_opcodes: MulticallerCalls) -> Result<MulticallerCalls>;
-    fn make_calls(&self, swap: &Swap) -> Result<MulticallerCalls>;
+    fn make_calls(&self, swap: &Swap<PoolEnum>) -> Result<MulticallerCalls>;
 }
 
 #[derive(Clone)]
@@ -29,7 +30,9 @@ impl MulticallerSwapEncoder {
     }
 }
 
-impl MulticallerEncoder for MulticallerSwapEncoder {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> MulticallerEncoder<PoolEnum>
+    for MulticallerSwapEncoder
+{
     fn encode_calls(&self, calls: MulticallerCalls) -> Result<(Address, Bytes)> {
         self.swap_step_encoder.to_call_data(&calls)
     }
@@ -38,7 +41,7 @@ impl MulticallerEncoder for MulticallerSwapEncoder {
         self.swap_step_encoder.encode_do_calls(opcodes, inside_opcodes)
     }
 
-    fn make_calls(&self, swap: &Swap) -> Result<MulticallerCalls> {
+    fn make_calls(&self, swap: &Swap<PoolEnum>) -> Result<MulticallerCalls> {
         match swap {
             Swap::BackrunSwapLine(swap_line) => {
                 let (swap_step_0, swap_step_1) = swap_line.to_swap_steps(self.multicaller_address).ok_or_eyre("SWAP_TYPE_NOT_COVERED")?;
@@ -51,7 +54,11 @@ impl MulticallerEncoder for MulticallerSwapEncoder {
                 } else {
                     let mut multicaller_calls = MulticallerCalls::new();
                     for swap in swap_vec {
-                        multicaller_calls = self.add_internal_calls(multicaller_calls, self.make_calls(swap)?)?;
+                        multicaller_calls = <MulticallerSwapEncoder as MulticallerEncoder<PoolEnum>>::add_internal_calls(
+                            self,
+                            multicaller_calls,
+                            self.make_calls(swap)?,
+                        )?;
                     }
                     Ok(multicaller_calls)
                 }

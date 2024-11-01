@@ -1,6 +1,7 @@
 use alloy_consensus::TxEnvelope;
 use alloy_rlp::Encodable;
 use eyre::{eyre, Result};
+use std::fmt::{Debug, Display};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 use tracing::{error, info};
@@ -8,9 +9,13 @@ use tracing::{error, info};
 use loom_core_actors::{Actor, ActorResult, Broadcaster, Consumer, Producer, WorkerResult};
 use loom_core_actors_macros::{Accessor, Consumer, Producer};
 use loom_core_blockchain::Blockchain;
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::{MessageTxCompose, RlpState, TxCompose, TxComposeData, TxState};
 
-async fn sign_task(sign_request: TxComposeData, compose_channel_tx: Broadcaster<MessageTxCompose>) -> Result<()> {
+async fn sign_task<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    sign_request: TxComposeData<PoolEnum>,
+    compose_channel_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
+) -> Result<()> {
     let signer = match sign_request.signer.clone() {
         Some(signer) => signer,
         None => {
@@ -63,16 +68,16 @@ async fn sign_task(sign_request: TxComposeData, compose_channel_tx: Broadcaster<
     }
 }
 
-async fn request_listener_worker(
-    compose_channel_rx: Broadcaster<MessageTxCompose>,
-    compose_channel_tx: Broadcaster<MessageTxCompose>,
+async fn request_listener_worker<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    compose_channel_rx: Broadcaster<MessageTxCompose<PoolEnum>>,
+    compose_channel_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
 ) -> WorkerResult {
-    let mut compose_channel_rx: Receiver<MessageTxCompose> = compose_channel_rx.subscribe().await;
+    let mut compose_channel_rx: Receiver<MessageTxCompose<PoolEnum>> = compose_channel_rx.subscribe().await;
 
     loop {
         tokio::select! {
             msg = compose_channel_rx.recv() => {
-                let compose_request_msg : Result<MessageTxCompose, RecvError> = msg;
+                let compose_request_msg : Result<MessageTxCompose<PoolEnum>, RecvError> = msg;
                 match compose_request_msg {
                     Ok(compose_request) =>{
 
@@ -92,25 +97,25 @@ async fn request_listener_worker(
     }
 }
 
-#[derive(Accessor, Consumer, Producer, Default)]
-pub struct TxSignersActor {
+#[derive(Accessor, Consumer, Producer)]
+pub struct TxSignersActor<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     #[consumer]
-    compose_channel_rx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_rx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[producer]
-    compose_channel_tx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_tx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
 }
 
-impl TxSignersActor {
-    pub fn new() -> TxSignersActor {
-        TxSignersActor::default()
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> TxSignersActor<PoolEnum> {
+    pub fn new() -> TxSignersActor<PoolEnum> {
+        TxSignersActor { compose_channel_rx: None, compose_channel_tx: None }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { compose_channel_rx: Some(bc.compose_channel()), compose_channel_tx: Some(bc.compose_channel()) }
     }
 }
 
-impl Actor for TxSignersActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Actor for TxSignersActor<PoolEnum> {
     fn start(&self) -> ActorResult {
         let task =
             tokio::task::spawn(request_listener_worker(self.compose_channel_rx.clone().unwrap(), self.compose_channel_tx.clone().unwrap()));

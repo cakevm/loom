@@ -4,7 +4,9 @@ use influxdb::{Client, ReadQuery, WriteQuery};
 use loom_core_actors::{Actor, ActorResult, Broadcaster, Consumer, WorkerResult};
 use loom_core_actors_macros::Consumer;
 use loom_core_blockchain::Blockchain;
+use loom_types_entities::{Pool, PoolEnumTrait};
 use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use tracing::{error, info, warn};
 
 pub async fn start_influxdb_worker(
@@ -61,7 +63,10 @@ impl InfluxDbWriterActor {
         Self { url, database, tags, influxdb_write_channel_rx: None }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> Self {
         Self { influxdb_write_channel_rx: Some(bc.influxdb_write_channel()), ..self }
     }
 }

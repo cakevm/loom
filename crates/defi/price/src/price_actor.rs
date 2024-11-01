@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::ops::{Div, Mul};
 use std::time::Duration;
@@ -13,15 +14,20 @@ use loom_core_blockchain::Blockchain;
 use loom_defi_address_book::TokenAddress;
 use loom_defi_pools::protocols::CurveProtocol;
 use loom_defi_pools::CurvePool;
-use loom_types_entities::{Market, Pool};
+use loom_types_entities::{Market, Pool, PoolEnumTrait};
 use tracing::{debug, error, info};
 
 //use market::{CurveProtocol, Market, PoolSetup};
 //use market::contracts::CurvePool;
 
-async fn price_worker<N: Network, T: Transport + Clone, P: Provider<T, N> + Clone + 'static>(
+async fn price_worker<
+    N: Network,
+    T: Transport + Clone,
+    P: Provider<T, N> + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+>(
     client: P,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     once: bool,
 ) -> WorkerResult {
     let curve_tricrypto_usdc = CurveProtocol::new_u256_3_eth_to(client.clone(), address!("7F86Bf177Dd4F3494b841a37e810A34dD56c829B"));
@@ -103,20 +109,21 @@ async fn price_worker<N: Network, T: Transport + Clone, P: Provider<T, N> + Clon
 }
 
 #[derive(Accessor)]
-pub struct PriceActor<P, T, N> {
+pub struct PriceActor<P, T, N, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     only_once: bool,
     #[accessor]
-    market: Option<SharedState<Market>>,
+    market: Option<SharedState<Market<PoolEnum>>>,
     _t: PhantomData<T>,
     _n: PhantomData<N>,
 }
 
-impl<P, T, N> PriceActor<P, T, N>
+impl<P, T, N, PoolEnum> PriceActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     pub fn new(client: P) -> Self {
         Self { client, only_once: false, market: None, _t: PhantomData, _n: PhantomData }
@@ -126,16 +133,17 @@ where
         Self { only_once: true, ..self }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { market: Some(bc.market()), ..self }
     }
 }
 
-impl<P, T, N> Actor for PriceActor<P, T, N>
+impl<P, T, N, PoolEnum> Actor for PriceActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(price_worker(self.client.clone(), self.market.clone().unwrap(), self.only_once));

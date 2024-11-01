@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 use alloy_network::Ethereum;
@@ -12,12 +13,14 @@ use loom_broadcast_flashbots::Flashbots;
 use loom_core_actors::{subscribe, Actor, ActorResult, Broadcaster, Consumer, WorkerResult};
 use loom_core_actors_macros::{Accessor, Consumer};
 use loom_core_blockchain::Blockchain;
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::{BestTxCompose, MessageTxCompose, RlpState, TxCompose, TxComposeData};
 
-async fn broadcast_task<P, T>(broadcast_request: TxComposeData, client: Arc<Flashbots<P, T>>) -> Result<()>
+async fn broadcast_task<P, T, PoolEnum>(broadcast_request: TxComposeData<PoolEnum>, client: Arc<Flashbots<P, T>>) -> Result<()>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     let block_number = broadcast_request.next_block_number;
 
@@ -40,25 +43,26 @@ where
     }
 }
 
-async fn flashbots_broadcaster_worker<P, T>(
+async fn flashbots_broadcaster_worker<P, T, PoolEnum>(
     client: Arc<Flashbots<P, T>>,
     smart_mode: bool,
-    bundle_rx: Broadcaster<MessageTxCompose>,
+    bundle_rx: Broadcaster<MessageTxCompose<PoolEnum>>,
     allow_broadcast: bool,
 ) -> WorkerResult
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     subscribe!(bundle_rx);
 
     let mut current_block: u64 = 0;
-    let mut best_request: BestTxCompose = Default::default();
+    let mut best_request: BestTxCompose<PoolEnum> = BestTxCompose::default();
 
     loop {
         tokio::select! {
             msg = bundle_rx.recv() => {
-                let broadcast_msg : Result<MessageTxCompose, RecvError> = msg;
+                let broadcast_msg : Result<MessageTxCompose<PoolEnum>, RecvError> = msg;
                 match broadcast_msg {
                     Ok(compose_request) => {
                         if let TxCompose::Broadcast(broadcast_request)  = compose_request.inner {
@@ -102,32 +106,34 @@ where
 }
 
 #[derive(Accessor, Consumer)]
-pub struct FlashbotsBroadcastActor<P, T> {
+pub struct FlashbotsBroadcastActor<P, T, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: Arc<Flashbots<P, T>>,
     smart: bool,
     #[consumer]
-    tx_compose_channel_rx: Option<Broadcaster<MessageTxCompose>>,
+    tx_compose_channel_rx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     allow_broadcast: bool,
 }
 
-impl<P, T> FlashbotsBroadcastActor<P, T>
+impl<P, T, PoolEnum> FlashbotsBroadcastActor<P, T, PoolEnum>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
-    pub fn new(client: Flashbots<P, T>, smart: bool, allow_broadcast: bool) -> FlashbotsBroadcastActor<P, T> {
+    pub fn new(client: Flashbots<P, T>, smart: bool, allow_broadcast: bool) -> FlashbotsBroadcastActor<P, T, PoolEnum> {
         FlashbotsBroadcastActor { client: Arc::new(client), smart, tx_compose_channel_rx: None, allow_broadcast }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { tx_compose_channel_rx: Some(bc.compose_channel()), ..self }
     }
 }
 
-impl<P, T> Actor for FlashbotsBroadcastActor<P, T>
+impl<P, T, PoolEnum> Actor for FlashbotsBroadcastActor<P, T, PoolEnum>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(flashbots_broadcaster_worker(

@@ -1,5 +1,6 @@
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 
 use alloy_eips::{BlockId, BlockNumberOrTag};
@@ -15,7 +16,7 @@ use loom_core_blockchain::Blockchain;
 use loom_defi_address_book::TokenAddress;
 use loom_evm_utils::{BalanceCheater, NWETH};
 use loom_types_blockchain::GethStateUpdate;
-use loom_types_entities::{AccountNonceAndBalanceState, MarketState, TxSigners};
+use loom_types_entities::{AccountNonceAndBalanceState, MarketState, Pool, PoolEnumTrait, TxSigners};
 use tracing::{debug, error, trace};
 
 async fn fetch_account_state<P, T, N>(client: P, address: Address) -> Result<AccountState>
@@ -173,7 +174,10 @@ where
         Self { name, ..self }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> Self {
         Self { market_state: Some(bc.market_state()), account_nonce_balance_state: Some(bc.nonce_and_balance()), ..self }
     }
 

@@ -10,7 +10,7 @@ pub use keystore::KeyStore;
 pub use latest_block::LatestBlock;
 pub use market::Market;
 pub use market_state::MarketState;
-pub use pool::{get_protocol_by_factory, AbiSwapEncoder, Pool, PoolClass, PoolProtocol, PoolWrapper, PreswapRequirement};
+pub use pool::{get_protocol_by_factory, AbiSwapEncoder, Pool, PoolClass, PoolEnumTrait, PoolProtocol, PoolWrapper, PreswapRequirement};
 pub use signers::{TxSigner, TxSigners};
 pub use swap::Swap;
 pub use swap_encoder::SwapEncoder;

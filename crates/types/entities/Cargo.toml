@@ -15,6 +15,7 @@ loom-node-debug-provider.workspace = true
 loom-types-blockchain.workspace = true
 
 aes.workspace = true
+enum_delegate.workspace = true
 eyre.workspace = true
 hex.workspace = true
 indexmap.workspace = true

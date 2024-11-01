@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 
 use alloy_eips::BlockNumberOrTag;
@@ -15,7 +16,7 @@ use tracing::{error, info, warn};
 use loom_core_actors::{Accessor, Actor, ActorResult, Broadcaster, Consumer, SharedState, WorkerResult};
 use loom_core_actors_macros::{Accessor, Consumer};
 use loom_core_blockchain::Blockchain;
-use loom_types_entities::MarketState;
+use loom_types_entities::{MarketState, Pool, PoolEnumTrait};
 use loom_types_events::{MarketEvents, MessageTxCompose, TxCompose};
 
 async fn verify_pool_state_task<T: Transport + Clone, P: Provider<T, Ethereum> + 'static>(
@@ -52,13 +53,17 @@ async fn verify_pool_state_task<T: Transport + Clone, P: Provider<T, Ethereum> +
     Ok(())
 }
 
-pub async fn state_health_monitor_worker<T: Transport + Clone, P: Provider<T, Ethereum> + Clone + 'static>(
+pub async fn state_health_monitor_worker<
+    T: Transport + Clone,
+    P: Provider<T, Ethereum> + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+>(
     client: P,
     market_state: SharedState<MarketState>,
-    tx_compose_channel_rx: Broadcaster<MessageTxCompose>,
+    tx_compose_channel_rx: Broadcaster<MessageTxCompose<PoolEnum>>,
     market_events_rx: Broadcaster<MarketEvents>,
 ) -> WorkerResult {
-    let mut tx_compose_channel_rx: Receiver<MessageTxCompose> = tx_compose_channel_rx.subscribe().await;
+    let mut tx_compose_channel_rx: Receiver<MessageTxCompose<PoolEnum>> = tx_compose_channel_rx.subscribe().await;
     let mut market_events_rx: Receiver<MarketEvents> = market_events_rx.subscribe().await;
 
     let mut check_time_map: HashMap<Address, DateTime<Local>> = HashMap::new();
@@ -88,7 +93,7 @@ pub async fn state_health_monitor_worker<T: Transport + Clone, P: Provider<T, Et
             },
 
             msg = tx_compose_channel_rx.recv() => {
-                let tx_compose_update : Result<MessageTxCompose, RecvError>  = msg;
+                let tx_compose_update : Result<MessageTxCompose<PoolEnum>, RecvError>  = msg;
                 match tx_compose_update {
                     Ok(tx_compose_msg)=>{
                         if let TxCompose::Broadcast(broadcast_data)= tx_compose_msg.inner {
@@ -116,27 +121,28 @@ pub async fn state_health_monitor_worker<T: Transport + Clone, P: Provider<T, Et
 }
 
 #[derive(Accessor, Consumer)]
-pub struct StateHealthMonitorActor<P, T> {
+pub struct StateHealthMonitorActor<P, T, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     #[accessor]
     market_state: Option<SharedState<MarketState>>,
     #[consumer]
-    tx_compose_channel_rx: Option<Broadcaster<MessageTxCompose>>,
+    tx_compose_channel_rx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[consumer]
     market_events_rx: Option<Broadcaster<MarketEvents>>,
     _t: PhantomData<T>,
 }
 
-impl<P, T> StateHealthMonitorActor<P, T>
+impl<P, T, PoolEnum> StateHealthMonitorActor<P, T, PoolEnum>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     pub fn new(client: P) -> Self {
         StateHealthMonitorActor { client, market_state: None, tx_compose_channel_rx: None, market_events_rx: None, _t: PhantomData }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self {
             market_state: Some(bc.market_state()),
             tx_compose_channel_rx: Some(bc.compose_channel()),
@@ -146,10 +152,11 @@ where
     }
 }
 
-impl<P, T> Actor for StateHealthMonitorActor<P, T>
+impl<P, T, PoolEnum> Actor for StateHealthMonitorActor<P, T, PoolEnum>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(state_health_monitor_worker(

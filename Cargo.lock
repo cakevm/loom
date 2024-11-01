@@ -2773,6 +2773,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum_delegate"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8ea75f31022cba043afe037940d73684327e915f88f62478e778c3de914cd0a"
+dependencies = [
+ "enum_delegate_lib",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "enum_delegate_lib"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e1f6c3800b304a6be0012039e2a45a322a093539c45ab818d9e6895a39c90fe"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rand",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "enumn"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4660,6 +4684,7 @@ dependencies = [
  "loom-core-actors-macros",
  "loom-core-blockchain",
  "loom-node-debug-provider",
+ "loom-types-entities",
  "loom-types-events",
  "tokio",
  "tracing",
@@ -4815,6 +4840,7 @@ dependencies = [
  "loom-core-actors-macros",
  "loom-core-blockchain",
  "loom-types-blockchain",
+ "loom-types-entities",
  "loom-types-events",
  "tokio",
  "tracing",
@@ -4897,6 +4923,19 @@ name = "loom-defi-address-book"
 version = "0.2.0"
 dependencies = [
  "alloy-primitives",
+]
+
+[[package]]
+name = "loom-defi-custom-pools"
+version = "0.2.0"
+dependencies = [
+ "alloy-primitives",
+ "enum_delegate",
+ "eyre",
+ "loom-defi-pools",
+ "loom-evm-db",
+ "loom-types-entities",
+ "revm",
 ]
 
 [[package]]
@@ -5133,6 +5172,7 @@ dependencies = [
  "loom-core-actors",
  "loom-core-actors-macros",
  "loom-core-blockchain",
+ "loom-types-entities",
  "loom-types-events",
  "tokio",
  "tracing",
@@ -5164,6 +5204,7 @@ dependencies = [
  "loom-evm-utils",
  "loom-node-actor-config",
  "loom-node-debug-provider",
+ "loom-types-entities",
  "loom-types-events",
  "reth-chainspec",
  "reth-db",
@@ -5215,6 +5256,7 @@ dependencies = [
  "loom-evm-utils",
  "loom-node-actor-config",
  "loom-types-blockchain",
+ "loom-types-entities",
  "loom-types-events",
  "reth-exex",
  "reth-node-api",
@@ -5243,6 +5285,7 @@ dependencies = [
  "loom-evm-utils",
  "loom-node-grpc-exex-proto",
  "loom-types-blockchain",
+ "loom-types-entities",
  "loom-types-events",
  "reth-exex",
  "reth-provider",
@@ -5301,6 +5344,7 @@ dependencies = [
  "loom-node-actor-config",
  "loom-node-debug-provider",
  "loom-types-blockchain",
+ "loom-types-entities",
  "loom-types-events",
  "tokio",
  "tracing",
@@ -5367,6 +5411,7 @@ dependencies = [
  "loom-core-blockchain",
  "loom-evm-utils",
  "loom-storage-db",
+ "loom-types-entities",
 ]
 
 [[package]]
@@ -5486,6 +5531,7 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "alloy-transport",
+ "enum_delegate",
  "eyre",
  "hex",
  "indexmap 2.6.0",
@@ -5586,6 +5632,7 @@ dependencies = [
  "futures-util",
  "hex",
  "loom",
+ "loom-defi-custom-pools",
  "reth",
  "reth-chainspec",
  "reth-db",

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 use alloy_network::Network;
@@ -15,22 +16,23 @@ use loom_defi_pools::state_readers::{UniswapV2StateReader, UniswapV3StateReader}
 use loom_defi_pools::{MaverickPool, PancakeV3Pool, UniswapV2Pool, UniswapV3Pool};
 use loom_evm_db::LoomDB;
 use loom_types_blockchain::GethStateUpdateVec;
-use loom_types_entities::{get_protocol_by_factory, Market, MarketState, Pool, PoolProtocol, PoolWrapper};
+use loom_types_entities::{get_protocol_by_factory, Market, MarketState, Pool, PoolEnumTrait, PoolProtocol, PoolWrapper};
 
-pub async fn get_affected_pools_from_code<P, T, N>(
+pub async fn get_affected_pools_from_code<P, T, N, PoolEnum>(
     client: P,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     state_update: &GethStateUpdateVec,
-) -> eyre::Result<BTreeMap<PoolWrapper, Vec<(Address, Address)>>>
+) -> eyre::Result<BTreeMap<PoolWrapper<PoolEnum>, Vec<(Address, Address)>>>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     let mut market_state = MarketState::new(Default::default());
     market_state.state_db.apply_geth_state_update(state_update, true, false);
 
-    let mut ret: BTreeMap<PoolWrapper, Vec<(Address, Address)>> = BTreeMap::new();
+    let mut ret: BTreeMap<PoolWrapper<PoolEnum>, Vec<(Address, Address)>> = BTreeMap::new();
 
     for state_update_record in state_update.iter() {
         for (address, state_update_entry) in state_update_record.iter() {
@@ -46,7 +48,8 @@ where
                             match UniswapV2StateReader::factory(&state_db, env.clone(), *address) {
                                 Ok(_factory_address) => match UniswapV2Pool::fetch_pool_data_evm(&state_db, env.clone(), *address) {
                                     Ok(pool) => {
-                                        let pool = PoolWrapper::new(Arc::new(pool));
+                                        let pool_enum = PoolEnum::try_into(pool)?;
+                                        let pool = PoolWrapper::new(pool_enum);
                                         debug!(?address, protocol = ?pool.get_protocol(), "UniswapV2 pool loaded");
                                         let swap_directions = pool.get_swap_directions();
                                         ret.insert(pool, swap_directions);
@@ -82,7 +85,7 @@ where
                                                 Ok(pool) => {
                                                     debug!(?address, protocol = ?pool.get_protocol(), "PancakeV3 Pool loaded");
                                                     let swap_directions = pool.get_swap_directions();
-                                                    ret.insert(PoolWrapper::new(Arc::new(pool)), swap_directions);
+                                                    ret.insert(PoolWrapper::new(PoolEnum::from(pool)), swap_directions);
                                                 }
                                                 Err(err) => {
                                                     error!(?address, %err, "Error loading PancakeV3 pool");
@@ -104,7 +107,7 @@ where
                                         }
                                         _ => match UniswapV3Pool::fetch_pool_data_evm(&state_db, env.clone(), *address) {
                                             Ok(pool) => {
-                                                let pool = PoolWrapper::new(Arc::new(pool));
+                                                let pool = PoolWrapper::new(PoolEnum::from(pool));
                                                 let swap_directions = pool.get_swap_directions();
                                                 debug!("UniswapV3 Pool loaded {address:?} {} : {:?}", pool.get_protocol(), swap_directions);
                                                 ret.insert(pool, swap_directions);

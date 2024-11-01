@@ -1,11 +1,12 @@
 use alloy_primitives::{hex, Bytes, B256};
 use eyre::eyre;
+use std::fmt::{Debug, Display};
 use tracing::{error, info};
 
 use loom_core_actors::{Accessor, Actor, ActorResult, SharedState, WorkerResult};
 use loom_core_actors_macros::Accessor;
 use loom_core_blockchain::Blockchain;
-use loom_types_entities::{AccountNonceAndBalanceState, KeyStore, TxSigners};
+use loom_types_entities::{AccountNonceAndBalanceState, KeyStore, Pool, PoolEnumTrait, TxSigners};
 
 /// The one-shot actor adds a new signer to the signers and monitor list after and stops.
 #[derive(Accessor)]
@@ -55,7 +56,10 @@ impl InitializeSignersOneShotBlockingActor {
         InitializeSignersOneShotBlockingActor { key: Some(key), signers: None, monitor: None }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> Self {
         Self { monitor: Some(bc.nonce_and_balance()), ..self }
     }
 

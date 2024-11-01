@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -10,7 +11,7 @@ use eyre::{eyre, Result};
 
 use loom_evm_db::LoomDBType;
 use loom_types_blockchain::GethStateUpdateVec;
-use loom_types_entities::{Swap, TxSigner};
+use loom_types_entities::{Pool, PoolEnumTrait, Swap, TxSigner};
 
 use crate::Message;
 
@@ -38,23 +39,23 @@ impl TxState {
 }
 
 #[derive(Clone, Debug)]
-pub enum TxCompose {
-    Route(TxComposeData),
-    Estimate(TxComposeData),
-    Sign(TxComposeData),
-    Broadcast(TxComposeData),
+pub enum TxCompose<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
+    Route(TxComposeData<PoolEnum>),
+    Estimate(TxComposeData<PoolEnum>),
+    Sign(TxComposeData<PoolEnum>),
+    Broadcast(TxComposeData<PoolEnum>),
 }
 
-impl Deref for TxCompose {
-    type Target = TxComposeData;
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Deref for TxCompose<PoolEnum> {
+    type Target = TxComposeData<PoolEnum>;
 
     fn deref(&self) -> &Self::Target {
         self.data()
     }
 }
 
-impl TxCompose {
-    pub fn data(&self) -> &TxComposeData {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> TxCompose<PoolEnum> {
+    pub fn data(&self) -> &TxComposeData<PoolEnum> {
         match self {
             TxCompose::Route(x) | TxCompose::Broadcast(x) | TxCompose::Sign(x) | TxCompose::Estimate(x) => x,
         }
@@ -82,7 +83,7 @@ impl RlpState {
 }
 
 #[derive(Clone, Debug)]
-pub struct TxComposeData {
+pub struct TxComposeData<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     /// The EOA address that will be used to sign the transaction.
     /// If this is None, the transaction will be signed by a random signer.
     pub eoa: Option<Address>,
@@ -97,7 +98,7 @@ pub struct TxComposeData {
     pub next_block_number: BlockNumber,
     pub next_block_timestamp: u64,
     pub next_block_base_fee: u64,
-    pub swap: Swap,
+    pub swap: Swap<PoolEnum>,
     pub tx_bundle: Option<Vec<TxState>>,
     pub rlp_bundle: Option<Vec<RlpState>>,
     pub prestate: Option<Arc<LoomDBType>>,
@@ -108,7 +109,7 @@ pub struct TxComposeData {
     pub tips: Option<U256>,
 }
 
-impl TxComposeData {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> TxComposeData<PoolEnum> {
     pub fn same_stuffing(&self, others_stuffing_txs_hashes: &[TxHash]) -> bool {
         let tx_len = self.stuffing_txs_hashes.len();
 
@@ -154,7 +155,7 @@ impl TxComposeData {
     }
 }
 
-impl Default for TxComposeData {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Default for TxComposeData<PoolEnum> {
     fn default() -> Self {
         Self {
             eoa: None,
@@ -182,22 +183,22 @@ impl Default for TxComposeData {
     }
 }
 
-pub type MessageTxCompose = Message<TxCompose>;
+pub type MessageTxCompose<PoolEnum> = Message<TxCompose<PoolEnum>>;
 
-impl MessageTxCompose {
-    pub fn route(data: TxComposeData) -> Self {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> MessageTxCompose<PoolEnum> {
+    pub fn route(data: TxComposeData<PoolEnum>) -> Self {
         Message::new(TxCompose::Route(data))
     }
 
-    pub fn sign(data: TxComposeData) -> Self {
+    pub fn sign(data: TxComposeData<PoolEnum>) -> Self {
         Message::new(TxCompose::Sign(data))
     }
 
-    pub fn estimate(data: TxComposeData) -> Self {
+    pub fn estimate(data: TxComposeData<PoolEnum>) -> Self {
         Message::new(TxCompose::Estimate(data))
     }
 
-    pub fn broadcast(data: TxComposeData) -> Self {
+    pub fn broadcast(data: TxComposeData<PoolEnum>) -> Self {
         Message::new(TxCompose::Broadcast(data))
     }
 }

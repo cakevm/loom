@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 use alloy_primitives::{Address, Bytes, U256};
@@ -6,7 +7,7 @@ use tracing::{trace, warn};
 
 use loom_defi_address_book::TokenAddress;
 use loom_types_blockchain::{MulticallerCall, MulticallerCalls};
-use loom_types_entities::{PoolClass, PoolWrapper, PreswapRequirement, SwapAmountType, SwapLine, Token};
+use loom_types_entities::{Pool, PoolClass, PoolEnumTrait, PoolWrapper, PreswapRequirement, SwapAmountType, SwapLine, Token};
 
 use crate::helpers::EncoderHelper;
 use crate::opcodes_encoder::{OpcodesEncoder, OpcodesEncoderV2};
@@ -22,9 +23,9 @@ impl SwapLineEncoder {
         SwapLineEncoder { multicaller }
     }
 
-    pub fn encode_flash_swap_line_in_amount(
+    pub fn encode_flash_swap_line_in_amount<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
         &self,
-        swap_path: &SwapLine,
+        swap_path: &SwapLine<PoolEnum>,
         inside_swap_opcodes: MulticallerCalls,
         funds_to: Address,
     ) -> Result<MulticallerCalls> {
@@ -32,12 +33,12 @@ impl SwapLineEncoder {
         let mut flash_swap_opcodes = MulticallerCalls::new();
         let mut inside_opcodes = inside_swap_opcodes.clone();
 
-        let mut reverse_pools: Vec<PoolWrapper> = swap_path.pools().clone();
+        let mut reverse_pools: Vec<PoolWrapper<PoolEnum>> = swap_path.pools().clone();
         reverse_pools.reverse();
         let mut reverse_tokens: Vec<Arc<Token>> = swap_path.tokens().clone();
         reverse_tokens.reverse();
 
-        let mut prev_pool: Option<&PoolWrapper> = None;
+        let mut prev_pool: Option<&PoolWrapper<PoolEnum>> = None;
 
         for (pool_idx, flash_pool) in reverse_pools.iter().enumerate() {
             let token_from_address = reverse_tokens[pool_idx + 1].get_address();
@@ -244,9 +245,9 @@ impl SwapLineEncoder {
         Ok(flash_swap_opcodes)
     }
 
-    pub fn encode_flash_swap_line_out_amount(
+    pub fn encode_flash_swap_line_out_amount<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
         &self,
-        swap_path: &SwapLine,
+        swap_path: &SwapLine<PoolEnum>,
         inside_swap_opcodes: MulticallerCalls,
         _funds_from: Address,
     ) -> Result<MulticallerCalls> {
@@ -254,7 +255,7 @@ impl SwapLineEncoder {
         let mut flash_swap_opcodes = MulticallerCalls::new();
         let mut inside_opcodes = inside_swap_opcodes.clone();
 
-        let pools: Vec<PoolWrapper> = swap_path.pools().clone();
+        let pools: Vec<PoolWrapper<PoolEnum>> = swap_path.pools().clone();
 
         let tokens: Vec<Arc<Token>> = swap_path.tokens().clone();
 
@@ -471,7 +472,12 @@ impl SwapLineEncoder {
         Err(eyre!("NOT_IMPLEMENTED"))
     }
 
-    pub fn encode_swap_line_in_amount(&self, swap_path: &SwapLine, funds_from: Address, funds_to: Address) -> Result<MulticallerCalls> {
+    pub fn encode_swap_line_in_amount<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        &self,
+        swap_path: &SwapLine<PoolEnum>,
+        funds_from: Address,
+        funds_to: Address,
+    ) -> Result<MulticallerCalls> {
         let mut swap_opcodes = MulticallerCalls::new();
 
         for i in 0..swap_path.pools().len() {
@@ -479,7 +485,8 @@ impl SwapLineEncoder {
             let token_to_address = swap_path.tokens()[i + 1].get_address();
 
             let cur_pool = &swap_path.pools()[i].clone();
-            let next_pool: Option<&PoolWrapper> = if i < swap_path.pools().len() - 1 { Some(&swap_path.pools()[i + 1]) } else { None };
+            let next_pool: Option<&PoolWrapper<PoolEnum>> =
+                if i < swap_path.pools().len() - 1 { Some(&swap_path.pools()[i + 1]) } else { None };
 
             trace!(
                 "encode_swap_line_in_amount for from={} to={} pool={}, next_pool={:?}",

@@ -9,6 +9,7 @@ use loom_core_blockchain::Blockchain;
 use loom_evm_utils::reth_types::append_all_matching_block_logs_sealed;
 use loom_node_actor_config::NodeBlockActorConfig;
 use loom_types_blockchain::{GethStateUpdate, MempoolTx};
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::{
     BlockHeader, BlockLogs, BlockStateUpdate, Message, MessageBlock, MessageBlockHeader, MessageBlockLogs, MessageBlockStateUpdate,
     MessageMempoolDataUpdate, NodeMempoolDataUpdate,
@@ -20,6 +21,7 @@ use reth_rpc::eth::EthTxBuilder;
 use reth_transaction_pool::TransactionPool;
 use revm::db::states::StorageSlot;
 use revm::db::{BundleAccount, StorageWithOriginalValues};
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use tokio::select;
 use tracing::{debug, error, info};
@@ -129,9 +131,9 @@ async fn process_chain(
     Ok(())
 }
 
-pub async fn loom_exex<Node: FullNodeComponents>(
+pub async fn loom_exex<Node: FullNodeComponents, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
     mut ctx: ExExContext<Node>,
-    bc: Blockchain,
+    bc: Blockchain<PoolEnum>,
     config: NodeBlockActorConfig,
 ) -> eyre::Result<()> {
     info!("Loom ExEx is started");
@@ -182,9 +184,10 @@ pub async fn loom_exex<Node: FullNodeComponents>(
     Ok(())
 }
 
-pub async fn mempool_worker<Pool>(mempool: Pool, bc: Blockchain) -> eyre::Result<()>
+pub async fn mempool_worker<Pool, PoolEnum>(mempool: Pool, bc: Blockchain<PoolEnum>) -> eyre::Result<()>
 where
     Pool: TransactionPool + Clone + 'static,
+    PoolEnum: loom_types_entities::PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     info!("Mempool worker started");
     let mut tx_listener = mempool.new_transactions_listener();

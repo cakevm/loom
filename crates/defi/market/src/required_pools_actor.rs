@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 
 use alloy_network::Network;
@@ -14,19 +15,20 @@ use loom_defi_pools::protocols::CurveProtocol;
 use loom_defi_pools::CurvePool;
 use loom_node_debug_provider::DebugProviderExt;
 use loom_types_entities::required_state::{RequiredState, RequiredStateReader};
-use loom_types_entities::{Market, MarketState, PoolClass};
+use loom_types_entities::{Market, MarketState, Pool, PoolClass, PoolEnumTrait};
 
-async fn required_pools_loader_worker<P, T, N>(
+async fn required_pools_loader_worker<P, T, N, PoolEnum>(
     client: P,
     pools: Vec<(Address, PoolClass)>,
     required_state: Option<RequiredState>,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     market_state: SharedState<MarketState>,
 ) -> WorkerResult
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     for (pool_address, pool_class) in pools {
         debug!(class=%pool_class, address=%pool_address, "Loading pool");
@@ -62,23 +64,24 @@ where
 }
 
 #[derive(Accessor, Consumer)]
-pub struct RequiredPoolLoaderActor<P, T, N> {
+pub struct RequiredPoolLoaderActor<P, T, N, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     pools: Vec<(Address, PoolClass)>,
     required_state: Option<RequiredState>,
     #[accessor]
-    market: Option<SharedState<Market>>,
+    market: Option<SharedState<Market<PoolEnum>>>,
     #[accessor]
     market_state: Option<SharedState<MarketState>>,
     _t: PhantomData<T>,
     _n: PhantomData<N>,
 }
 
-impl<P, T, N> RequiredPoolLoaderActor<P, T, N>
+impl<P, T, N, PoolEnum> RequiredPoolLoaderActor<P, T, N, PoolEnum>
 where
     N: Network,
     T: Transport + Clone,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     pub fn new(client: P) -> Self {
         Self { client, pools: Vec::new(), required_state: None, market: None, market_state: None, _n: PhantomData, _t: PhantomData }
@@ -90,7 +93,7 @@ where
         Self { pools, ..self }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { market: Some(bc.market()), market_state: Some(bc.market_state()), ..self }
     }
 
@@ -99,11 +102,12 @@ where
     }
 }
 
-impl<P, T, N> Actor for RequiredPoolLoaderActor<P, T, N>
+impl<P, T, N, PoolEnum> Actor for RequiredPoolLoaderActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(required_pools_loader_worker(

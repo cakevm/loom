@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 
 use alloy_network::Network;
@@ -10,7 +11,7 @@ use loom_core_actors::{Accessor, Actor, ActorResult, Broadcaster, Consumer, Prod
 use loom_core_actors_macros::{Accessor, Consumer, Producer};
 use loom_node_debug_provider::DebugProviderExt;
 use loom_types_blockchain::Mempool;
-use loom_types_entities::{BlockHistory, LatestBlock, Market, MarketState};
+use loom_types_entities::{BlockHistory, LatestBlock, Market, MarketState, Pool, PoolEnumTrait};
 use loom_types_events::{MarketEvents, MempoolEvents, MessageHealthEvent, MessageTxCompose};
 
 use super::{PendingTxStateChangeProcessorActor, StateChangeArbSearcherActor};
@@ -18,13 +19,13 @@ use crate::block_state_change_processor::BlockStateChangeProcessorActor;
 use crate::BackrunConfig;
 
 #[derive(Accessor, Consumer, Producer)]
-pub struct StateChangeArbActor<P, T, N> {
+pub struct StateChangeArbActor<P, T, N, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     backrun_config: BackrunConfig,
     client: P,
     use_blocks: bool,
     use_mempool: bool,
     #[accessor]
-    market: Option<SharedState<Market>>,
+    market: Option<SharedState<Market<PoolEnum>>>,
     #[accessor]
     mempool: Option<SharedState<Mempool>>,
     #[accessor]
@@ -38,20 +39,21 @@ pub struct StateChangeArbActor<P, T, N> {
     #[consumer]
     market_events_tx: Option<Broadcaster<MarketEvents>>,
     #[producer]
-    compose_channel_tx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_tx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[producer]
     pool_health_monitor_tx: Option<Broadcaster<MessageHealthEvent>>,
     _t: PhantomData<T>,
     _n: PhantomData<N>,
 }
 
-impl<P, T, N> StateChangeArbActor<P, T, N>
+impl<P, T, N, PoolEnum> StateChangeArbActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
-    pub fn new(client: P, use_blocks: bool, use_mempool: bool, backrun_config: BackrunConfig) -> StateChangeArbActor<P, T, N> {
+    pub fn new(client: P, use_blocks: bool, use_mempool: bool, backrun_config: BackrunConfig) -> StateChangeArbActor<P, T, N, PoolEnum> {
         StateChangeArbActor {
             backrun_config,
             client,
@@ -72,11 +74,12 @@ where
     }
 }
 
-impl<P, T, N> Actor for StateChangeArbActor<P, T, N>
+impl<P, T, N, PoolEnum> Actor for StateChangeArbActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let searcher_pool_update_channel = Broadcaster::new(100);

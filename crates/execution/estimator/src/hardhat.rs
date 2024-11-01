@@ -4,26 +4,27 @@ use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use eyre::{eyre, Result};
+use std::fmt::{Debug, Display};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{error, info};
 
 use loom_core_actors::{subscribe, Actor, ActorResult, Broadcaster, Consumer, Producer, WorkerResult};
 use loom_core_actors_macros::{Consumer, Producer};
 use loom_node_debug_provider::DebugProviderExt;
-use loom_types_entities::SwapEncoder;
+use loom_types_entities::{Pool, PoolEnumTrait, SwapEncoder};
 use loom_types_events::{MessageTxCompose, TxCompose, TxComposeData, TxState};
 
-async fn estimator_worker(
-    swap_encoder: impl SwapEncoder,
-    compose_channel_rx: Broadcaster<MessageTxCompose>,
-    compose_channel_tx: Broadcaster<MessageTxCompose>,
+async fn estimator_worker<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    swap_encoder: impl SwapEncoder<PoolEnum>,
+    compose_channel_rx: Broadcaster<MessageTxCompose<PoolEnum>>,
+    compose_channel_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
 ) -> WorkerResult {
     subscribe!(compose_channel_rx);
 
     loop {
         tokio::select! {
                     msg = compose_channel_rx.recv() => {
-                        let compose_request_msg : Result<MessageTxCompose, RecvError> = msg;
+                        let compose_request_msg : Result<MessageTxCompose<PoolEnum>, RecvError> = msg;
                         match compose_request_msg {
                             Ok(compose_request) =>{
                                 if let TxCompose::Estimate(estimate_request) = compose_request.inner {
@@ -99,29 +100,31 @@ async fn estimator_worker(
 
 #[allow(dead_code)]
 #[derive(Consumer, Producer)]
-pub struct HardhatEstimatorActor<P, E> {
+pub struct HardhatEstimatorActor<P, E, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     encoder: E,
     #[consumer]
-    compose_channel_rx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_rx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[producer]
-    compose_channel_tx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_tx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
 }
 
-impl<P, E> HardhatEstimatorActor<P, E>
+impl<P, E, PoolEnum> HardhatEstimatorActor<P, E, PoolEnum>
 where
     P: Provider + DebugProviderExt + Clone + Send + Sync + 'static,
-    E: SwapEncoder + Send + Sync + Clone + 'static,
+    E: SwapEncoder<PoolEnum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     pub fn new(client: P, encoder: E) -> Self {
         Self { client, encoder, compose_channel_tx: None, compose_channel_rx: None }
     }
 }
 
-impl<P, E> Actor for HardhatEstimatorActor<P, E>
+impl<P, E, PoolEnum> Actor for HardhatEstimatorActor<P, E, PoolEnum>
 where
     P: Provider + DebugProviderExt + Clone + Send + Sync + 'static,
-    E: SwapEncoder + Send + Sync + Clone + 'static,
+    E: SwapEncoder<PoolEnum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(estimator_worker(

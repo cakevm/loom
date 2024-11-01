@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -6,20 +7,20 @@ use std::sync::Arc;
 use alloy_primitives::Address;
 use eyre::Result;
 
-use crate::{PoolWrapper, Token};
+use crate::{Pool, PoolEnumTrait, PoolWrapper, Token};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SwapPath {
+pub struct SwapPath<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     pub tokens: Vec<Arc<Token>>,
-    pub pools: Vec<PoolWrapper>,
+    pub pools: Vec<PoolWrapper<PoolEnum>>,
 }
 
-impl SwapPath {
-    pub fn new<T: Into<Arc<Token>>, P: Into<PoolWrapper>>(tokens: Vec<T>, pools: Vec<P>) -> Self {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> SwapPath<PoolEnum> {
+    pub fn new<T: Into<Arc<Token>>, P: Into<PoolWrapper<PoolEnum>>>(tokens: Vec<T>, pools: Vec<P>) -> Self {
         SwapPath { tokens: tokens.into_iter().map(|i| i.into()).collect(), pools: pools.into_iter().map(|i| i.into()).collect() }
     }
 
-    pub fn is_emply(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.tokens.is_empty() && self.pools.is_empty()
     }
 
@@ -31,12 +32,12 @@ impl SwapPath {
         self.pools.len()
     }
 
-    pub fn new_swap(token_from: Arc<Token>, token_to: Arc<Token>, pool: PoolWrapper) -> Self {
+    pub fn new_swap(token_from: Arc<Token>, token_to: Arc<Token>, pool: PoolWrapper<PoolEnum>) -> Self {
         SwapPath { tokens: vec![token_from, token_to], pools: vec![pool] }
     }
 
-    pub fn push_swap_hope(&mut self, token_from: Arc<Token>, token_to: Arc<Token>, pool: PoolWrapper) -> Result<&mut Self> {
-        if self.is_emply() {
+    pub fn push_swap_hope(&mut self, token_from: Arc<Token>, token_to: Arc<Token>, pool: PoolWrapper<PoolEnum>) -> Result<&mut Self> {
+        if self.is_empty() {
             self.tokens = vec![token_from, token_to];
             self.pools = vec![pool];
         } else {
@@ -49,8 +50,8 @@ impl SwapPath {
         Ok(self)
     }
 
-    pub fn insert_swap_hope(&mut self, token_from: Arc<Token>, token_to: Arc<Token>, pool: PoolWrapper) -> Result<&mut Self> {
-        if self.is_emply() {
+    pub fn insert_swap_hope(&mut self, token_from: Arc<Token>, token_to: Arc<Token>, pool: PoolWrapper<PoolEnum>) -> Result<&mut Self> {
+        if self.is_empty() {
             self.tokens = vec![token_from, token_to];
             self.pools = vec![pool];
         } else {
@@ -64,7 +65,7 @@ impl SwapPath {
         Ok(self)
     }
 
-    pub fn contains_pool(&self, pool: &PoolWrapper) -> bool {
+    pub fn contains_pool(&self, pool: &PoolWrapper<PoolEnum>) -> bool {
         for p in self.pools.iter() {
             if p.get_address() == pool.get_address() {
                 return true;
@@ -74,32 +75,32 @@ impl SwapPath {
     }
 }
 
-impl Hash for SwapPath {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Hash for SwapPath<PoolEnum> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.tokens.hash(state);
         self.pools.hash(state);
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct SwapPaths {
-    paths: HashSet<Arc<SwapPath>>,
-    pool_paths: HashMap<Address, Arc<Vec<SwapPath>>>,
+#[derive(Clone, Debug)]
+pub struct SwapPaths<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
+    paths: HashSet<Arc<SwapPath<PoolEnum>>>,
+    pool_paths: HashMap<Address, Arc<Vec<SwapPath<PoolEnum>>>>,
 }
 
-impl SwapPaths {
-    pub fn new() -> SwapPaths {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> SwapPaths<PoolEnum> {
+    pub fn new() -> SwapPaths<PoolEnum> {
         SwapPaths { paths: HashSet::new(), pool_paths: HashMap::new() }
     }
-    pub fn from(paths: Vec<SwapPath>) -> Self {
-        let mut ret = Self::default();
+    pub fn from(paths: Vec<SwapPath<PoolEnum>>) -> Self {
+        let mut ret = SwapPaths::default();
         for p in paths {
             ret.add(p);
         }
         ret
     }
 
-    pub fn add_mut(&mut self, path: SwapPath) -> bool {
+    pub fn add_mut(&mut self, path: SwapPath<PoolEnum>) -> bool {
         let rc_path = Arc::new(path.clone());
 
         if self.paths.insert(rc_path.clone()) {
@@ -116,8 +117,8 @@ impl SwapPaths {
         }
     }
 
-    pub fn add<T: Into<SwapPath> + Clone>(&mut self, path: T) {
-        let rc_path: Arc<SwapPath> = Arc::new(path.clone().into());
+    pub fn add<T: Into<SwapPath<PoolEnum>> + Clone>(&mut self, path: T) {
+        let rc_path: Arc<SwapPath<PoolEnum>> = Arc::new(path.clone().into());
 
         if self.paths.insert(rc_path.clone()) {
             for pool in rc_path.pools.iter() {
@@ -130,18 +131,25 @@ impl SwapPaths {
         }
     }
 
-    pub fn get_pool_paths_hashset(&self, pool_address: &Address) -> Option<&Arc<Vec<SwapPath>>> {
+    pub fn get_pool_paths_hashset(&self, pool_address: &Address) -> Option<&Arc<Vec<SwapPath<PoolEnum>>>> {
         self.pool_paths.get(pool_address)
     }
 
-    pub fn get_pool_paths_vec(&self, pool_address: &Address) -> Option<Vec<SwapPath>> {
+    pub fn get_pool_paths_vec(&self, pool_address: &Address) -> Option<Vec<SwapPath<PoolEnum>>> {
         self.get_pool_paths_hashset(pool_address).map(|set| set.iter().cloned().collect())
+    }
+}
+
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Default for SwapPaths<PoolEnum> {
+    fn default() -> Self {
+        SwapPaths::<PoolEnum> { paths: HashSet::new(), pool_paths: HashMap::new() }
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::mock_pool::MockPoolEnum;
     use crate::pool::DefaultAbiSwapEncoder;
     use crate::required_state::RequiredState;
     use crate::{AbiSwapEncoder, Pool};
@@ -207,7 +215,7 @@ mod test {
     fn test_add_path() {
         let basic_token = Token::new(Address::repeat_byte(0x11));
 
-        let paths_vec: Vec<SwapPath> = (0..10)
+        let paths_vec: Vec<SwapPath<MockPoolEnum>> = (0..10)
             .map(|i| {
                 SwapPath::new(
                     vec![basic_token.clone(), Token::new(Address::repeat_byte(i)), basic_token.clone()],
@@ -229,7 +237,7 @@ mod test {
 
         const PATHS_COUNT: usize = 10;
 
-        let pool_address_vec: Vec<(PoolWrapper, PoolWrapper)> = (0..PATHS_COUNT)
+        let pool_address_vec: Vec<(PoolWrapper<MockPoolEnum>, PoolWrapper<MockPoolEnum>)> = (0..PATHS_COUNT)
             .map(|i| {
                 (
                     PoolWrapper::new(Arc::new(EmptyPool::new(Address::repeat_byte(i as u8)))),
@@ -238,7 +246,7 @@ mod test {
             })
             .collect();
 
-        let paths_vec: Vec<SwapPath> = pool_address_vec
+        let paths_vec: Vec<SwapPath<MockPoolEnum>> = pool_address_vec
             .iter()
             .map(|p| {
                 SwapPath::new(

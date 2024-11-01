@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 
 use alloy_network::Network;
@@ -12,6 +13,7 @@ use loom_core_actors_macros::Producer;
 use loom_core_blockchain::Blockchain;
 use loom_defi_pools::PoolsConfig;
 use loom_node_debug_provider::DebugProviderExt;
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::Task;
 
 async fn history_pool_loader_one_shot_worker<P, T, N>(client: P, pools_config: PoolsConfig, tasks_tx: Broadcaster<Task>) -> WorkerResult
@@ -65,7 +67,10 @@ where
         Self { client, pools_config, tasks_tx: None, _t: PhantomData, _n: PhantomData }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> Self {
         Self { tasks_tx: Some(bc.tasks_channel()), ..self }
     }
 }

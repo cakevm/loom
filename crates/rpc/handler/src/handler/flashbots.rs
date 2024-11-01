@@ -7,12 +7,14 @@ use loom_evm_utils::evm::evm_transact;
 use loom_evm_utils::evm_tx_env::env_from_signed_tx;
 use loom_rpc_state::AppState;
 use loom_types_blockchain::ChainParameters;
+use loom_types_entities::Pool;
 use revm::primitives::{BlockEnv, Env, CANCUN};
 use revm::Evm;
+use std::fmt::{Debug, Display};
 use tracing::{error, info};
 
-pub async fn flashbots(
-    State(app_state): State<AppState>,
+pub async fn flashbots<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    State(app_state): State<AppState<PoolEnum>>,
     Json(bundle_request): Json<BundleRequest>,
 ) -> Result<Json<SendBundleResponse>, (StatusCode, String)> {
     for (bundle_idx, bundle_param) in bundle_request.params.iter().enumerate() {

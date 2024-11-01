@@ -1,21 +1,22 @@
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 use alloy_primitives::Address;
 use eyre::{eyre, OptionExt, Result};
 use tracing::debug;
 
-use crate::build_swap_path_vec;
+use crate::{build_swap_path_vec, Pool, PoolEnumTrait};
 use crate::{PoolClass, PoolWrapper, Token};
 use crate::{SwapPath, SwapPaths};
 use loom_defi_address_book::TokenAddress;
 
 /// The market struct contains all the pools and tokens.
 /// It keeps track if a pool is disabled or not and the swap paths.
-#[derive(Default, Clone)]
-pub struct Market {
+#[derive(Clone)]
+pub struct Market<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     // pool_address -> pool
-    pools: HashMap<Address, PoolWrapper>,
+    pools: HashMap<Address, PoolWrapper<PoolEnum>>,
     // pool_address -> is_disabled
     pools_disabled: HashMap<Address, bool>,
     // token_address -> token
@@ -27,10 +28,13 @@ pub struct Market {
     // token -> pool
     token_pools: HashMap<Address, Vec<Address>>,
     // swap_paths
-    swap_paths: SwapPaths,
+    swap_paths: SwapPaths<PoolEnum>,
 }
 
-impl Market {
+impl<PoolEnum> Market<PoolEnum>
+where
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+{
     /// Add a [`Token`] reference to the market.
     pub fn add_token<T: Into<Arc<Token>>>(&mut self, token: T) -> Result<()> {
         let arc_token: Arc<Token> = token.into();
@@ -53,7 +57,7 @@ impl Market {
     }
 
     /// Add a new pool to the market if it does not exist or the class is unknown.
-    pub fn add_pool<T: Into<PoolWrapper>>(&mut self, pool: T) -> Result<()> {
+    pub fn add_pool<T: Into<PoolWrapper<PoolEnum>>>(&mut self, pool: T) -> Result<()> {
         let pool_contract = pool.into();
         let pool_address = pool_contract.get_address();
 
@@ -76,19 +80,19 @@ impl Market {
     }
 
     /// Add a swap path to the market.
-    pub fn add_paths<T: Into<SwapPath> + Clone>(&mut self, paths: Vec<T>) {
+    pub fn add_paths<T: Into<SwapPath<PoolEnum>> + Clone>(&mut self, paths: Vec<T>) {
         for path in paths.into_iter() {
             self.swap_paths.add(path);
         }
     }
 
     /// Get all swap paths from the market by the pool address.
-    pub fn get_pool_paths(&self, pool_address: &Address) -> Option<Vec<SwapPath>> {
+    pub fn get_pool_paths(&self, pool_address: &Address) -> Option<Vec<SwapPath<PoolEnum>>> {
         self.swap_paths.get_pool_paths_vec(pool_address)
     }
 
     /// Get a pool reference by the pool address. If the pool exists but the class is unknown it returns None.
-    pub fn get_pool(&self, address: &Address) -> Option<&PoolWrapper> {
+    pub fn get_pool(&self, address: &Address) -> Option<&PoolWrapper<PoolEnum>> {
         self.pools.get(address).filter(|&pool_wrapper| pool_wrapper.get_class() != PoolClass::Unknown)
     }
 
@@ -98,7 +102,7 @@ impl Market {
     }
 
     /// Get a reference to the pools map in the market.
-    pub fn pools(&self) -> &HashMap<Address, PoolWrapper> {
+    pub fn pools(&self) -> &HashMap<Address, PoolWrapper<PoolEnum>> {
         &self.pools
     }
 
@@ -199,14 +203,17 @@ impl Market {
     }
 
     /// Build a list of swap paths from the given directions.
-    pub fn build_swap_path_vec(&self, directions: &BTreeMap<PoolWrapper, Vec<(Address, Address)>>) -> Result<Vec<SwapPath>> {
+    pub fn build_swap_path_vec(
+        &self,
+        directions: &BTreeMap<PoolWrapper<PoolEnum>, Vec<(Address, Address)>>,
+    ) -> Result<Vec<SwapPath<PoolEnum>>> {
         build_swap_path_vec(self, directions)
     }
 
     /// get a [`SwapPath`] from the given token and pool addresses.
-    pub fn swap_path(&self, token_address_vec: Vec<Address>, pool_address_vec: Vec<Address>) -> Result<SwapPath> {
+    pub fn swap_path(&self, token_address_vec: Vec<Address>, pool_address_vec: Vec<Address>) -> Result<SwapPath<PoolEnum>> {
         let mut tokens: Vec<Arc<Token>> = Vec::new();
-        let mut pools: Vec<PoolWrapper> = Vec::new();
+        let mut pools: Vec<PoolWrapper<PoolEnum>> = Vec::new();
 
         for token_address in token_address_vec.iter() {
             tokens.push(self.get_token(token_address).ok_or_eyre("TOKEN_NOT_FOUND")?);
@@ -219,16 +226,34 @@ impl Market {
     }
 }
 
+impl<PoolEnum> Default for Market<PoolEnum>
+where
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+{
+    fn default() -> Self {
+        Market {
+            pools: HashMap::new(),
+            pools_disabled: HashMap::new(),
+            tokens: HashMap::new(),
+            token_tokens: HashMap::new(),
+            token_token_pools: HashMap::new(),
+            token_pools: HashMap::new(),
+            swap_paths: SwapPaths::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock_pool::MockPool;
+    use crate::mock_pool::{MockPool, MockPoolEnum};
+    use crate::Pool;
     use alloy_primitives::Address;
     use eyre::Result;
 
     #[test]
     fn test_add_pool() {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
         let pool_address = Address::random();
         let token0 = Address::random();
         let token1 = Address::random();
@@ -252,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_add_token() {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
         let token_address = Address::random();
 
         let result = market.add_token(Arc::new(Token::new(token_address)));
@@ -263,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_get_token_default() {
-        let market = Market::default();
+        let market = Market::<MockPoolEnum>::default();
         let token_address = Address::random();
 
         let token = market.get_token_or_default(&token_address);
@@ -273,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_get_pool() {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
         let pool_address = Address::random();
         let mock_pool = MockPool { address: pool_address, token0: Address::ZERO, token1: Address::ZERO };
         market.add_pool(mock_pool.clone());
@@ -285,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_is_pool() {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
         let pool_address = Address::random();
         let mock_pool = MockPool { address: pool_address, token0: Address::ZERO, token1: Address::ZERO };
         market.add_pool(mock_pool.clone());
@@ -297,7 +322,7 @@ mod tests {
 
     #[test]
     fn test_is_pool_not_found() {
-        let market = Market::default();
+        let market = Market::<MockPoolEnum>::default();
         let pool_address = Address::random();
 
         let is_pool = market.is_pool(&pool_address);
@@ -307,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_set_pool_ok() {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
         let pool_address = Address::random();
         let token0 = Address::random();
         let token1 = Address::random();
@@ -330,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_get_token_token_pools() {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
         let pool_address = Address::random();
         let token0 = Address::random();
         let token1 = Address::random();
@@ -344,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_get_token_tokens() {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
         let pool_address = Address::random();
         let token0 = Address::random();
         let token1 = Address::random();
@@ -358,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_get_token_pools() {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
         let pool_address = Address::random();
         let token0 = Address::random();
         let token1 = Address::random();
@@ -372,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_build_swap_path_vec_two_hops() -> Result<()> {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
 
         // Add basic token for start/end
         let weth_token = Token::new_with_data(TokenAddress::WETH, Some("WETH".to_string()), None, Some(18), true, false);
@@ -381,7 +406,8 @@ mod tests {
         // Swap pool: token weth -> token1
         let pool_address1 = Address::random();
         let token1 = Address::random();
-        let mock_pool1 = PoolWrapper::new(Arc::new(MockPool { address: pool_address1, token0: TokenAddress::WETH, token1 }));
+        let mock_pool1 =
+            PoolWrapper::new(Arc::new(MockPoolEnum::from(MockPool { address: pool_address1, token0: TokenAddress::WETH, token1 })));
         market.add_pool(mock_pool1.clone());
 
         // Swap pool: token weth -> token1
@@ -433,7 +459,7 @@ mod tests {
 
     #[test]
     fn test_build_swap_path_vec_three_hops() -> Result<()> {
-        let mut market = Market::default();
+        let mut market = Market::<MockPoolEnum>::default();
 
         // Add basic token for start/end
         let weth_token = Token::new_with_data(TokenAddress::WETH, Some("WETH".to_string()), None, Some(18), true, false);

@@ -3,8 +3,9 @@ use alloy_primitives::U256;
 use lazy_static::lazy_static;
 use loom_evm_db::LoomDBType;
 use loom_types_blockchain::SwapError;
-use loom_types_entities::SwapLine;
+use loom_types_entities::{Pool, PoolEnumTrait, SwapLine};
 use revm::primitives::Env;
+use std::fmt::{Debug, Display};
 
 lazy_static! {
     static ref START_OPTIMIZE_INPUT: U256 = parse_units("0.01", "ether").unwrap().get_absolute();
@@ -14,7 +15,11 @@ pub struct SwapCalculator {}
 
 impl SwapCalculator {
     #[inline]
-    pub fn calculate<'a>(path: &'a mut SwapLine, state: &LoomDBType, env: Env) -> eyre::Result<&'a mut SwapLine, SwapError> {
+    pub fn calculate<'a, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        path: &'a mut SwapLine<PoolEnum>,
+        state: &LoomDBType,
+        env: Env,
+    ) -> eyre::Result<&'a mut SwapLine<PoolEnum>, SwapError> {
         let first_token = path.get_first_token().unwrap();
         if let Some(amount_in) = first_token.calc_token_value_from_eth(*START_OPTIMIZE_INPUT) {
             //trace!("calculate : {} amount in : {}",first_token.get_symbol(), first_token.to_float(amount_in) );

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 use alloy_primitives::{Address, U256};
@@ -19,36 +20,39 @@ use loom_core_actors_macros::{Accessor, Consumer, Producer};
 use loom_core_blockchain::Blockchain;
 use loom_types_blockchain::SwapError;
 use loom_types_entities::config::StrategyConfig;
-use loom_types_entities::{Market, PoolWrapper, Swap, SwapLine, SwapPath};
+use loom_types_entities::{Market, Pool, PoolEnumTrait, PoolWrapper, Swap, SwapLine, SwapPath};
 use loom_types_events::{
     BestTxCompose, HealthEvent, Message, MessageHealthEvent, MessageTxCompose, StateUpdateEvent, TxCompose, TxComposeData,
 };
 
-async fn state_change_arb_searcher_task(
+async fn state_change_arb_searcher_task<PoolEnum>(
     thread_pool: Arc<ThreadPool>,
     backrun_config: BackrunConfig,
-    state_update_event: StateUpdateEvent,
-    market: SharedState<Market>,
-    swap_request_tx: Broadcaster<MessageTxCompose>,
+    state_update_event: StateUpdateEvent<PoolEnum>,
+    market: SharedState<Market<PoolEnum>>,
+    swap_request_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
     pool_health_monitor_tx: Broadcaster<MessageHealthEvent>,
-) -> Result<()> {
+) -> Result<()>
+where
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+{
     debug!("Message received {} stuffing : {:?}", state_update_event.origin, state_update_event.stuffing_tx_hash());
 
     let mut db = state_update_event.market_state().clone();
     db.apply_geth_update_vec(state_update_event.state_update().clone());
 
     let start_time = chrono::Local::now();
-    let mut swap_path_vec: Vec<SwapPath> = Vec::new();
+    let mut swap_path_vec: Vec<SwapPath<PoolEnum>> = Vec::new();
 
     let market_guard_read = market.read().await;
     for (pool, v) in state_update_event.directions().iter() {
-        let pool_paths: Vec<SwapPath> = match market_guard_read.get_pool_paths(&pool.get_address()) {
+        let pool_paths: Vec<SwapPath<PoolEnum>> = match market_guard_read.get_pool_paths(&pool.get_address()) {
             Some(paths) => paths
                 .into_iter()
                 .filter(|swap_path| !swap_path.pools.iter().any(|pool| !market_guard_read.is_pool_ok(&pool.get_address())))
                 .collect(),
             None => {
-                let mut pool_direction: BTreeMap<PoolWrapper, Vec<(Address, Address)>> = BTreeMap::new();
+                let mut pool_direction: BTreeMap<PoolWrapper<PoolEnum>, Vec<(Address, Address)>> = BTreeMap::new();
                 pool_direction.insert(pool.clone(), v.clone());
                 market_guard_read.build_swap_path_vec(&pool_direction).unwrap_or_default()
             }
@@ -79,7 +83,14 @@ async fn state_change_arb_searcher_task(
     tokio::task::spawn(async move {
         thread_pool.install(|| {
             swap_path_vec.into_par_iter().for_each_with((&swap_path_tx, &market_state_clone, &env), |req, item| {
-                let mut mut_item: SwapLine = SwapLine { path: item, ..Default::default() };
+                let mut mut_item: SwapLine<PoolEnum> = SwapLine {
+                    path: item,
+                    amount_in: Default::default(),
+                    amount_out: Default::default(),
+                    calculation_results: vec![],
+                    swap_to: None,
+                    gas_used: None,
+                };
                 #[cfg(not(debug_assertions))]
                 let start_time = chrono::Local::now();
                 let calc_result = SwapCalculator::calculate(&mut mut_item, req.1, req.2.clone());
@@ -186,11 +197,11 @@ async fn state_change_arb_searcher_task(
     Ok(())
 }
 
-pub async fn state_change_arb_searcher_worker(
+pub async fn state_change_arb_searcher_worker<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
     backrun_config: BackrunConfig,
-    market: SharedState<Market>,
-    search_request_rx: Broadcaster<StateUpdateEvent>,
-    swap_request_tx: Broadcaster<MessageTxCompose>,
+    market: SharedState<Market<PoolEnum>>,
+    search_request_rx: Broadcaster<StateUpdateEvent<PoolEnum>>,
+    swap_request_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
     pool_health_monitor_tx: Broadcaster<MessageHealthEvent>,
 ) -> WorkerResult {
     subscribe!(search_request_rx);
@@ -202,7 +213,7 @@ pub async fn state_change_arb_searcher_worker(
     loop {
         tokio::select! {
                 msg = search_request_rx.recv() => {
-                let pool_update_msg : Result<StateUpdateEvent, RecvError> = msg;
+                let pool_update_msg : Result<StateUpdateEvent<PoolEnum>, RecvError> = msg;
                 if let Ok(msg) = pool_update_msg {
                     tokio::task::spawn(
                         state_change_arb_searcher_task(
@@ -221,24 +232,24 @@ pub async fn state_change_arb_searcher_worker(
 }
 
 #[derive(Accessor, Consumer, Producer)]
-pub struct StateChangeArbSearcherActor {
+pub struct StateChangeArbSearcherActor<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     backrun_config: BackrunConfig,
     #[accessor]
-    market: Option<SharedState<Market>>,
+    market: Option<SharedState<Market<PoolEnum>>>,
     #[consumer]
-    state_update_rx: Option<Broadcaster<StateUpdateEvent>>,
+    state_update_rx: Option<Broadcaster<StateUpdateEvent<PoolEnum>>>,
     #[producer]
-    compose_tx: Option<Broadcaster<MessageTxCompose>>,
+    compose_tx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[producer]
     pool_health_monitor_tx: Option<Broadcaster<MessageHealthEvent>>,
 }
 
-impl StateChangeArbSearcherActor {
-    pub fn new(backrun_config: BackrunConfig) -> StateChangeArbSearcherActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> StateChangeArbSearcherActor<PoolEnum> {
+    pub fn new(backrun_config: BackrunConfig) -> StateChangeArbSearcherActor<PoolEnum> {
         StateChangeArbSearcherActor { backrun_config, market: None, state_update_rx: None, compose_tx: None, pool_health_monitor_tx: None }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self {
             market: Some(bc.market()),
             compose_tx: Some(bc.compose_channel()),
@@ -249,7 +260,9 @@ impl StateChangeArbSearcherActor {
     }
 }
 
-impl Actor for StateChangeArbSearcherActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Actor
+    for StateChangeArbSearcherActor<PoolEnum>
+{
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(state_change_arb_searcher_worker(
             self.backrun_config.clone(),

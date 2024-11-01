@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 
 use alloy_network::Ethereum;
@@ -11,6 +12,7 @@ use loom_core_actors::{Actor, ActorResult, Broadcaster, Producer, WorkerResult};
 use loom_core_actors_macros::*;
 use loom_core_blockchain::Blockchain;
 use loom_types_blockchain::MempoolTx;
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::{MessageMempoolDataUpdate, NodeMempoolDataUpdate};
 
 /// Worker listens for new transactions in the node mempool and broadcasts [`MessageMempoolDataUpdate`].
@@ -62,7 +64,10 @@ where
         self.name
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> Self {
         Self { mempool_tx: Some(bc.new_mempool_tx_channel()), ..self }
     }
 }

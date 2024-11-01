@@ -2,20 +2,21 @@ use alloy_primitives::{Address, Bytes, U256};
 use eyre::{eyre, Result};
 use loom_defi_address_book::TokenAddress;
 use loom_types_blockchain::{MulticallerCall, MulticallerCalls};
-use loom_types_entities::{PoolWrapper, SwapAmountType};
+use loom_types_entities::{Pool, PoolEnumTrait, PoolWrapper, SwapAmountType};
+use std::fmt::{Debug, Display};
 
 use crate::helpers::EncoderHelper;
 
 pub struct WstEthSwapEncoder {}
 
 impl WstEthSwapEncoder {
-    pub fn encode_swap_in_amount_provided(
+    pub fn encode_swap_in_amount_provided<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
         token_from_address: Address,
         token_to_address: Address,
         amount_in: SwapAmountType,
         swap_opcodes: &mut MulticallerCalls,
-        cur_pool: &PoolWrapper,
-        next_pool: Option<&PoolWrapper>,
+        cur_pool: &PoolWrapper<PoolEnum>,
+        next_pool: Option<&PoolWrapper<PoolEnum>>,
         multicaller: Address,
     ) -> Result<()> {
         let pool_encoder = cur_pool.get_encoder();

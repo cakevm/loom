@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 use alloy_primitives::{Address, BlockNumber, TxHash};
 use alloy_rpc_types::Transaction;
@@ -8,17 +8,17 @@ use revm::primitives::Env;
 use loom_evm_db::LoomDBType;
 use loom_evm_utils::evm_env::env_for_block;
 use loom_types_blockchain::GethStateUpdateVec;
-use loom_types_entities::PoolWrapper;
+use loom_types_entities::{Pool, PoolEnumTrait, PoolWrapper};
 
 #[derive(Clone, Debug)]
-pub struct StateUpdateEvent {
+pub struct StateUpdateEvent<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     pub next_block_number: BlockNumber,
     pub next_block_timestamp: u64,
     pub next_base_fee: u64,
     market_state: LoomDBType,
     state_update: GethStateUpdateVec,
     state_required: Option<GethStateUpdateVec>,
-    directions: BTreeMap<PoolWrapper, Vec<(Address, Address)>>,
+    directions: BTreeMap<PoolWrapper<PoolEnum>, Vec<(Address, Address)>>,
     pub stuffing_txs_hashes: Vec<TxHash>,
     pub stuffing_txs: Vec<Transaction>,
     pub origin: String,
@@ -26,7 +26,7 @@ pub struct StateUpdateEvent {
 }
 
 #[allow(clippy::too_many_arguments)]
-impl StateUpdateEvent {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> StateUpdateEvent<PoolEnum> {
     pub fn new(
         next_block: u64,
         next_block_timestamp: u64,
@@ -34,12 +34,12 @@ impl StateUpdateEvent {
         market_state: LoomDBType,
         state_update: GethStateUpdateVec,
         state_required: Option<GethStateUpdateVec>,
-        directions: BTreeMap<PoolWrapper, Vec<(Address, Address)>>,
+        directions: BTreeMap<PoolWrapper<PoolEnum>, Vec<(Address, Address)>>,
         stuffing_txs_hashes: Vec<TxHash>,
         stuffing_txs: Vec<Transaction>,
         origin: String,
         tips_pct: u32,
-    ) -> StateUpdateEvent {
+    ) -> StateUpdateEvent<PoolEnum> {
         StateUpdateEvent {
             next_block_number: next_block,
             next_block_timestamp,
@@ -59,7 +59,7 @@ impl StateUpdateEvent {
         env_for_block(self.next_block_number, self.next_block_timestamp)
     }
 
-    pub fn directions(&self) -> &BTreeMap<PoolWrapper, Vec<(Address, Address)>> {
+    pub fn directions(&self) -> &BTreeMap<PoolWrapper<PoolEnum>, Vec<(Address, Address)>> {
         &self.directions
     }
 

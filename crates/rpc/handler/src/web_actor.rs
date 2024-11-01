@@ -5,16 +5,18 @@ use loom_core_actors_macros::Consumer;
 use loom_core_blockchain::Blockchain;
 use loom_rpc_state::AppState;
 use loom_storage_db::DbPool;
+use loom_types_entities::{Pool, PoolEnumTrait};
+use std::fmt::{Debug, Display};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::info;
 
-pub async fn start_web_server_worker<S>(
+pub async fn start_web_server_worker<S, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
     host: String,
     extra_router: Router<S>,
-    bc: Blockchain,
+    bc: Blockchain<PoolEnum>,
     db_pool: DbPool,
     shutdown_token: CancellationToken,
 ) -> WorkerResult
@@ -42,32 +44,34 @@ where
 }
 
 #[derive(Consumer)]
-pub struct WebServerActor<S> {
+pub struct WebServerActor<S, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     host: String,
     extra_router: Router<S>,
     shutdown_token: CancellationToken,
     db_pool: DbPool,
-    bc: Option<Blockchain>,
+    bc: Option<Blockchain<PoolEnum>>,
 }
 
-impl<S> WebServerActor<S>
+impl<S, PoolEnum> WebServerActor<S, PoolEnum>
 where
     S: Clone + Send + Sync + 'static,
     Router: From<Router<S>>,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     pub fn new(host: String, extra_router: Router<S>, db_pool: DbPool, shutdown_token: CancellationToken) -> Self {
         Self { host, extra_router, shutdown_token, db_pool, bc: None }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { bc: Some(bc.clone()), ..self }
     }
 }
 
-impl<S> Actor for WebServerActor<S>
+impl<S, PoolEnum> Actor for WebServerActor<S, PoolEnum>
 where
     S: Clone + Send + Sync + 'static,
     Router: From<Router<S>>,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::spawn(start_web_server_worker(

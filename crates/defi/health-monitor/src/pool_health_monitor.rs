@@ -1,18 +1,18 @@
-use std::collections::HashMap;
-
 use alloy_primitives::Address;
 use eyre::Result;
+use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, error, info};
 
 use loom_core_actors::{subscribe, Accessor, Actor, ActorResult, Broadcaster, Consumer, SharedState, WorkerResult};
 use loom_core_actors_macros::{Accessor, Consumer};
 use loom_core_blockchain::Blockchain;
-use loom_types_entities::Market;
+use loom_types_entities::{Market, Pool, PoolEnumTrait};
 use loom_types_events::{HealthEvent, MessageHealthEvent};
 
-pub async fn pool_health_monitor_worker(
-    market: SharedState<Market>,
+pub async fn pool_health_monitor_worker<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    market: SharedState<Market<PoolEnum>>,
     pool_health_monitor_rx: Broadcaster<MessageHealthEvent>,
 ) -> WorkerResult {
     subscribe!(pool_health_monitor_rx);
@@ -54,25 +54,25 @@ pub async fn pool_health_monitor_worker(
     }
 }
 
-#[derive(Accessor, Consumer, Default)]
-pub struct PoolHealthMonitorActor {
+#[derive(Accessor, Consumer)]
+pub struct PoolHealthMonitorActor<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     #[accessor]
-    market: Option<SharedState<Market>>,
+    market: Option<SharedState<Market<PoolEnum>>>,
     #[consumer]
     pool_health_update_rx: Option<Broadcaster<MessageHealthEvent>>,
 }
 
-impl PoolHealthMonitorActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> PoolHealthMonitorActor<PoolEnum> {
     pub fn new() -> Self {
-        PoolHealthMonitorActor::default()
+        PoolHealthMonitorActor { market: None, pool_health_update_rx: None }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { market: Some(bc.market()), pool_health_update_rx: Some(bc.pool_health_monitor_channel()) }
     }
 }
 
-impl Actor for PoolHealthMonitorActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Actor for PoolHealthMonitorActor<PoolEnum> {
     fn start(&self) -> ActorResult {
         let task =
             tokio::task::spawn(pool_health_monitor_worker(self.market.clone().unwrap(), self.pool_health_update_rx.clone().unwrap()));

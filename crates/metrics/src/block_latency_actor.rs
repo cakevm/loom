@@ -5,7 +5,9 @@ use loom_core_actors::Producer;
 use loom_core_actors::{subscribe, Actor, ActorResult, Broadcaster, WorkerResult};
 use loom_core_actors_macros::{Accessor, Consumer, Producer};
 use loom_core_blockchain::Blockchain;
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::MessageBlockHeader;
+use std::fmt::{Debug, Display};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{error, info};
 
@@ -71,7 +73,10 @@ impl BlockLatencyRecorderActor {
         Self { block_header_rx: None, influxdb_write_channel_tx: None }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> Self {
         Self { block_header_rx: Some(bc.new_block_headers_channel()), influxdb_write_channel_tx: Some(bc.influxdb_write_channel()) }
     }
 }

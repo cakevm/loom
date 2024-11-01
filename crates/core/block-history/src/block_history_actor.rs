@@ -9,9 +9,10 @@ use loom_core_actors_macros::{Accessor, Consumer, Producer};
 use loom_core_blockchain::Blockchain;
 use loom_node_debug_provider::DebugProviderExt;
 use loom_types_blockchain::ChainParameters;
-use loom_types_entities::{apply_state_update, BlockHistory, BlockHistoryManager, LatestBlock, MarketState};
+use loom_types_entities::{apply_state_update, BlockHistory, BlockHistoryManager, LatestBlock, MarketState, Pool, PoolEnumTrait};
 use loom_types_events::{MarketEvents, MessageBlock, MessageBlockHeader, MessageBlockLogs, MessageBlockStateUpdate};
 use std::borrow::BorrowMut;
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::ops::DerefMut;
 use tokio::sync::broadcast::error::RecvError;
@@ -366,7 +367,10 @@ where
         }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> Self {
         Self {
             chain_parameters: bc.chain_parameters(),
             latest_block: Some(bc.latest_block()),

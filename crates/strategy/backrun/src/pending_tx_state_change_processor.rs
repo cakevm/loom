@@ -12,6 +12,7 @@ use lazy_static::lazy_static;
 use revm::primitives::bitvec::macros::internal::funty::Fundamental;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -23,7 +24,7 @@ use loom_core_blockchain::Blockchain;
 use loom_node_debug_provider::DebugProviderExt;
 use loom_types_blockchain::{debug_trace_call_diff, GethStateUpdateVec, Mempool, TRACING_CALL_OPTS};
 use loom_types_entities::required_state::accounts_vec_len;
-use loom_types_entities::{LatestBlock, Market, MarketState};
+use loom_types_entities::{LatestBlock, Market, MarketState, Pool, PoolEnumTrait};
 use loom_types_events::{MarketEvents, MempoolEvents, StateUpdateEvent};
 
 use super::affected_pools::get_affected_pools;
@@ -35,10 +36,10 @@ lazy_static! {
 
 /// Process a pending tx from the mempool
 #[allow(clippy::too_many_arguments)]
-pub async fn pending_tx_state_change_task<P, T, N>(
+pub async fn pending_tx_state_change_task<P, T, N, PoolEnum>(
     client: P,
     tx_hash: TxHash,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     mempool: SharedState<Mempool>,
     latest_block: SharedState<LatestBlock>,
     market_state: SharedState<MarketState>,
@@ -47,12 +48,13 @@ pub async fn pending_tx_state_change_task<P, T, N>(
     cur_block_time: u64,
     cur_next_base_fee: u64,
     cur_state_override: StateOverride,
-    state_updates_broadcaster: Broadcaster<StateUpdateEvent>,
+    state_updates_broadcaster: Broadcaster<StateUpdateEvent<PoolEnum>>,
 ) -> Result<()>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     let mut state_update_vec: GethStateUpdateVec = Vec::new();
     let mut state_required_vec: GethStateUpdateVec = Vec::new();
@@ -247,20 +249,21 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn pending_tx_state_change_worker<P, T, N>(
+pub async fn pending_tx_state_change_worker<P, T, N, PoolEnum>(
     client: P,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     mempool: SharedState<Mempool>,
     latest_block: SharedState<LatestBlock>,
     market_state: SharedState<MarketState>,
     mempool_events_rx: Broadcaster<MempoolEvents>,
     market_events_rx: Broadcaster<MarketEvents>,
-    state_updates_broadcaster: Broadcaster<StateUpdateEvent>,
+    state_updates_broadcaster: Broadcaster<StateUpdateEvent<PoolEnum>>,
 ) -> WorkerResult
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     subscribe!(mempool_events_rx);
     subscribe!(market_events_rx);
@@ -327,10 +330,15 @@ where
 }
 
 #[derive(Accessor, Consumer, Producer)]
-pub struct PendingTxStateChangeProcessorActor<P, T, N> {
+pub struct PendingTxStateChangeProcessorActor<
+    P,
+    T,
+    N,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+> {
     client: P,
     #[accessor]
-    market: Option<SharedState<Market>>,
+    market: Option<SharedState<Market<PoolEnum>>>,
     #[accessor]
     mempool: Option<SharedState<Mempool>>,
     #[accessor]
@@ -342,18 +350,19 @@ pub struct PendingTxStateChangeProcessorActor<P, T, N> {
     #[consumer]
     mempool_events_rx: Option<Broadcaster<MempoolEvents>>,
     #[producer]
-    state_updates_tx: Option<Broadcaster<StateUpdateEvent>>,
+    state_updates_tx: Option<Broadcaster<StateUpdateEvent<PoolEnum>>>,
     _t: PhantomData<T>,
     _n: PhantomData<N>,
 }
 
-impl<P, T, N> PendingTxStateChangeProcessorActor<P, T, N>
+impl<P, T, N, PoolEnum> PendingTxStateChangeProcessorActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
-    pub fn new(client: P) -> PendingTxStateChangeProcessorActor<P, T, N> {
+    pub fn new(client: P) -> PendingTxStateChangeProcessorActor<P, T, N, PoolEnum> {
         PendingTxStateChangeProcessorActor {
             client,
             market: None,
@@ -368,7 +377,7 @@ where
         }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self {
             market: Some(bc.market()),
             mempool: Some(bc.mempool()),
@@ -382,11 +391,12 @@ where
     }
 }
 
-impl<P, T, N> Actor for PendingTxStateChangeProcessorActor<P, T, N>
+impl<P, T, N, PoolEnum> Actor for PendingTxStateChangeProcessorActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(pending_tx_state_change_worker(

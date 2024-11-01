@@ -1,4 +1,5 @@
 use eyre::Result;
+use std::fmt::{Debug, Display};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, error};
 
@@ -6,6 +7,7 @@ use loom_core_actors::{subscribe, Actor, ActorResult, Broadcaster, Consumer, Pro
 use loom_core_actors_macros::{Consumer, Producer};
 use loom_core_blockchain::Blockchain;
 use loom_defi_pools::PoolsConfig;
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::{MessageBlockLogs, Task};
 
 use crate::logs_parser::process_log_entries;
@@ -55,7 +57,10 @@ impl NewPoolLoaderActor {
         NewPoolLoaderActor { log_update_rx: None, pools_config, tasks_tx: None }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> Self {
         Self { log_update_rx: Some(bc.new_block_logs_channel()), tasks_tx: Some(bc.tasks_channel()), ..self }
     }
 }

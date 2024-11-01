@@ -1,22 +1,28 @@
-use alloy_primitives::U256;
-
 use crate::TxComposeData;
+use alloy_primitives::U256;
+use loom_types_entities::{Pool, PoolEnumTrait};
+use std::fmt::{Debug, Display};
 
-#[derive(Default)]
-pub struct BestTxCompose {
+pub struct BestTxCompose<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     validity_pct: Option<U256>,
-    best_profit_swap: Option<TxComposeData>,
-    best_profit_gas_ratio_swap: Option<TxComposeData>,
-    best_tips_swap: Option<TxComposeData>,
-    best_tips_gas_ratio_swap: Option<TxComposeData>,
+    best_profit_swap: Option<TxComposeData<PoolEnum>>,
+    best_profit_gas_ratio_swap: Option<TxComposeData<PoolEnum>>,
+    best_tips_swap: Option<TxComposeData<PoolEnum>>,
+    best_tips_gas_ratio_swap: Option<TxComposeData<PoolEnum>>,
 }
 
-impl BestTxCompose {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> BestTxCompose<PoolEnum> {
     pub fn new_with_pct<T: Into<U256>>(validity_pct: T) -> Self {
-        BestTxCompose { validity_pct: Some(validity_pct.into()), ..Default::default() }
+        BestTxCompose {
+            validity_pct: Some(validity_pct.into()),
+            best_profit_swap: None,
+            best_profit_gas_ratio_swap: None,
+            best_tips_swap: None,
+            best_tips_gas_ratio_swap: None,
+        }
     }
 
-    pub fn check(&mut self, request: &TxComposeData) -> bool {
+    pub fn check(&mut self, request: &TxComposeData<PoolEnum>) -> bool {
         let mut is_ok = false;
 
         match &self.best_profit_swap {
@@ -91,5 +97,17 @@ impl BestTxCompose {
             }
         }
         is_ok
+    }
+}
+
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Default for BestTxCompose<PoolEnum> {
+    fn default() -> Self {
+        BestTxCompose {
+            validity_pct: None,
+            best_profit_swap: None,
+            best_profit_gas_ratio_swap: None,
+            best_tips_swap: None,
+            best_tips_gas_ratio_swap: None,
+        }
     }
 }

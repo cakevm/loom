@@ -2,6 +2,7 @@ use alloy_primitives::BlockNumber;
 use alloy_rpc_types::BlockTransactions;
 use chrono::{Duration, Utc};
 use eyre::eyre;
+use std::fmt::{Debug, Display};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, error, info, trace};
 
@@ -9,6 +10,7 @@ use loom_core_actors::{run_async, subscribe, Accessor, Actor, ActorResult, Broad
 use loom_core_actors_macros::{Accessor, Consumer, Producer};
 use loom_core_blockchain::Blockchain;
 use loom_types_blockchain::{ChainParameters, Mempool, MempoolTx};
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::{MempoolEvents, MessageBlock, MessageBlockHeader, MessageMempoolDataUpdate};
 
 pub async fn new_mempool_worker(
@@ -187,7 +189,10 @@ impl MempoolActor {
         MempoolActor::default()
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> MempoolActor {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> MempoolActor {
         Self {
             chain_parameters: bc.chain_parameters(),
             mempool: Some(bc.mempool()),

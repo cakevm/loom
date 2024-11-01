@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 use alloy_consensus::TxEnvelope;
@@ -13,18 +14,22 @@ use tracing::{debug, error, info};
 
 use loom_core_blockchain::Blockchain;
 use loom_evm_utils::NWETH;
-use loom_types_entities::{Swap, SwapEncoder};
+use loom_types_entities::{Pool, PoolEnumTrait, Swap, SwapEncoder};
 
 use loom_broadcast_flashbots::Flashbots;
 use loom_core_actors::{subscribe, Actor, ActorResult, Broadcaster, Consumer, Producer, WorkerResult};
 use loom_core_actors_macros::{Consumer, Producer};
 use loom_types_events::{MessageTxCompose, TxCompose, TxComposeData, TxState};
 
-async fn estimator_task<T: Transport + Clone, P: Provider<T, Ethereum> + Send + Sync + Clone + 'static>(
-    estimate_request: TxComposeData,
+async fn estimator_task<
+    T: Transport + Clone,
+    P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+>(
+    estimate_request: TxComposeData<PoolEnum>,
     client: Arc<Flashbots<P, T>>,
-    swap_encoder: impl SwapEncoder,
-    compose_channel_tx: Broadcaster<MessageTxCompose>,
+    swap_encoder: impl SwapEncoder<PoolEnum>,
+    compose_channel_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
 ) -> Result<()> {
     let token_in = estimate_request.swap.get_first_token().cloned().ok_or(eyre!("NO_TOKEN"))?;
 
@@ -195,18 +200,22 @@ async fn estimator_task<T: Transport + Clone, P: Provider<T, Ethereum> + Send + 
     Ok(())
 }
 
-async fn estimator_worker<T: Transport + Clone, P: Provider<T, Ethereum> + Send + Sync + Clone + 'static>(
+async fn estimator_worker<
+    T: Transport + Clone,
+    P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+>(
     client: Arc<Flashbots<P, T>>,
-    encoder: impl SwapEncoder + Send + Sync + Clone + 'static,
-    compose_channel_rx: Broadcaster<MessageTxCompose>,
-    compose_channel_tx: Broadcaster<MessageTxCompose>,
+    encoder: impl SwapEncoder<PoolEnum> + Send + Sync + Clone + 'static,
+    compose_channel_rx: Broadcaster<MessageTxCompose<PoolEnum>>,
+    compose_channel_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
 ) -> WorkerResult {
     subscribe!(compose_channel_rx);
 
     loop {
         tokio::select! {
             msg = compose_channel_rx.recv() => {
-                let compose_request_msg : Result<MessageTxCompose, RecvError> = msg;
+                let compose_request_msg : Result<MessageTxCompose<PoolEnum>, RecvError> = msg;
                 match compose_request_msg {
                     Ok(compose_request) =>{
                         if let TxCompose::Estimate(estimate_request) = compose_request.inner {
@@ -234,35 +243,37 @@ async fn estimator_worker<T: Transport + Clone, P: Provider<T, Ethereum> + Send 
 }
 
 #[derive(Consumer, Producer)]
-pub struct GethEstimatorActor<P, T, E> {
+pub struct GethEstimatorActor<P, T, E, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: Arc<Flashbots<P, T>>,
     encoder: E,
     #[consumer]
-    compose_channel_rx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_rx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[producer]
-    compose_channel_tx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_tx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
 }
 
-impl<P, T, E> GethEstimatorActor<P, T, E>
+impl<P, T, E, PoolEnum> GethEstimatorActor<P, T, E, PoolEnum>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
-    E: SwapEncoder + Send + Sync + Clone + 'static,
+    E: SwapEncoder<PoolEnum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     pub fn new(client: Arc<Flashbots<P, T>>, encoder: E) -> Self {
         Self { client, encoder, compose_channel_tx: None, compose_channel_rx: None }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { compose_channel_tx: Some(bc.compose_channel()), compose_channel_rx: Some(bc.compose_channel()), ..self }
     }
 }
 
-impl<P, T, E> Actor for GethEstimatorActor<P, T, E>
+impl<P, T, E, PoolEnum> Actor for GethEstimatorActor<P, T, E, PoolEnum>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
-    E: SwapEncoder + Send + Sync + Clone + 'static,
+    E: SwapEncoder<PoolEnum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(estimator_worker(

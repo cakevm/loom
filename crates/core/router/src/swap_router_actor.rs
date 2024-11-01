@@ -2,16 +2,17 @@ use eyre::{eyre, Result};
 use loom_core_actors::{Accessor, Actor, ActorResult, Broadcaster, Consumer, Producer, SharedState, WorkerResult};
 use loom_core_actors_macros::{Accessor, Consumer, Producer};
 use loom_core_blockchain::Blockchain;
-use loom_types_entities::{AccountNonceAndBalanceState, TxSigners};
+use loom_types_entities::{AccountNonceAndBalanceState, Pool, PoolEnumTrait, TxSigners};
 use loom_types_events::{MessageTxCompose, TxCompose, TxComposeData};
+use std::fmt::{Debug, Display};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 use tracing::{debug, error, info};
 
 /// encoder task performs encode for request
-async fn router_task(
-    route_request: TxComposeData,
-    compose_channel_tx: Broadcaster<MessageTxCompose>,
+async fn router_task<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    route_request: TxComposeData<PoolEnum>,
+    compose_channel_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
     signers: SharedState<TxSigners>,
     account_monitor: SharedState<AccountNonceAndBalanceState>,
 ) -> Result<()> {
@@ -44,20 +45,20 @@ async fn router_task(
     }
 }
 
-async fn swap_router_worker(
+async fn swap_router_worker<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
     signers: SharedState<TxSigners>,
     account_monitor: SharedState<AccountNonceAndBalanceState>,
-    compose_channel_rx: Broadcaster<MessageTxCompose>,
-    compose_channel_tx: Broadcaster<MessageTxCompose>,
+    compose_channel_rx: Broadcaster<MessageTxCompose<PoolEnum>>,
+    compose_channel_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
 ) -> WorkerResult {
-    let mut compose_channel_rx: Receiver<MessageTxCompose> = compose_channel_rx.subscribe().await;
+    let mut compose_channel_rx: Receiver<MessageTxCompose<PoolEnum>> = compose_channel_rx.subscribe().await;
 
     info!("swap router worker started");
 
     loop {
         tokio::select! {
             msg = compose_channel_rx.recv() => {
-                let msg : Result<MessageTxCompose, RecvError> = msg;
+                let msg : Result<MessageTxCompose<PoolEnum>, RecvError> = msg;
                 match msg {
                     Ok(compose_request) => {
                         if let TxCompose::Route(encode_request) = compose_request.inner {
@@ -80,19 +81,19 @@ async fn swap_router_worker(
 }
 
 #[derive(Consumer, Producer, Accessor, Default)]
-pub struct SwapRouterActor {
+pub struct SwapRouterActor<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     #[accessor]
     signers: Option<SharedState<TxSigners>>,
     #[accessor]
     account_nonce_balance: Option<SharedState<AccountNonceAndBalanceState>>,
     #[consumer]
-    compose_channel_rx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_rx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[producer]
-    compose_channel_tx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_tx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
 }
 
-impl SwapRouterActor {
-    pub fn new() -> SwapRouterActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> SwapRouterActor<PoolEnum> {
+    pub fn new() -> SwapRouterActor<PoolEnum> {
         SwapRouterActor { signers: None, account_nonce_balance: None, compose_channel_rx: None, compose_channel_tx: None }
     }
 
@@ -100,7 +101,7 @@ impl SwapRouterActor {
         Self { signers: Some(signers), ..self }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self {
             account_nonce_balance: Some(bc.nonce_and_balance()),
             compose_channel_rx: Some(bc.compose_channel()),
@@ -110,7 +111,7 @@ impl SwapRouterActor {
     }
 }
 
-impl Actor for SwapRouterActor {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Actor for SwapRouterActor<PoolEnum> {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(swap_router_worker(
             self.signers.clone().unwrap(),

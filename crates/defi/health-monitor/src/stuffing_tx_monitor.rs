@@ -4,6 +4,7 @@ use alloy_provider::Provider;
 use alloy_transport::Transport;
 use eyre::{eyre, Result};
 use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
@@ -12,7 +13,7 @@ use tracing::{error, info};
 
 use loom_core_blockchain::Blockchain;
 use loom_evm_utils::NWETH;
-use loom_types_entities::{LatestBlock, Swap, Token};
+use loom_types_entities::{LatestBlock, Pool, PoolEnumTrait, Swap, Token};
 
 use loom_core_actors::{Accessor, Actor, ActorResult, Broadcaster, Consumer, SharedState, WorkerResult};
 use loom_core_actors_macros::{Accessor, Consumer};
@@ -20,12 +21,12 @@ use loom_types_blockchain::debug_trace_transaction;
 use loom_types_events::{MarketEvents, MessageTxCompose, TxCompose};
 
 #[derive(Clone, Debug)]
-struct TxToCheck {
+struct TxToCheck<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     block: u64,
     token_in: Token,
     profit: U256,
     tips: U256,
-    swap: Swap,
+    swap: Swap<PoolEnum>,
 }
 
 async fn check_mf_tx<P: Provider<T, Ethereum> + 'static, T: Transport + Clone>(
@@ -44,16 +45,20 @@ async fn check_mf_tx<P: Provider<T, Ethereum> + 'static, T: Transport + Clone>(
     Ok(())
 }
 
-pub async fn stuffing_tx_monitor_worker<P: Provider<T, Ethereum> + Clone + 'static, T: Transport + Clone>(
+pub async fn stuffing_tx_monitor_worker<
+    P: Provider<T, Ethereum> + Clone + 'static,
+    T: Transport + Clone,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+>(
     client: P,
     latest_block: SharedState<LatestBlock>,
-    tx_compose_channel_rx: Broadcaster<MessageTxCompose>,
+    tx_compose_channel_rx: Broadcaster<MessageTxCompose<PoolEnum>>,
     market_events_rx: Broadcaster<MarketEvents>,
 ) -> WorkerResult {
-    let mut tx_compose_channel_rx: Receiver<MessageTxCompose> = tx_compose_channel_rx.subscribe().await;
+    let mut tx_compose_channel_rx: Receiver<MessageTxCompose<PoolEnum>> = tx_compose_channel_rx.subscribe().await;
     let mut market_events_rx: Receiver<MarketEvents> = market_events_rx.subscribe().await;
 
-    let mut txs_to_check: HashMap<TxHash, TxToCheck> = HashMap::new();
+    let mut txs_to_check: HashMap<TxHash, TxToCheck<PoolEnum>> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -89,7 +94,7 @@ pub async fn stuffing_tx_monitor_worker<P: Provider<T, Ethereum> + Clone + 'stat
             },
 
             msg = tx_compose_channel_rx.recv() => {
-                let tx_compose_update : Result<MessageTxCompose, RecvError>  = msg;
+                let tx_compose_update : Result<MessageTxCompose<PoolEnum>, RecvError>  = msg;
                 match tx_compose_update {
                     Ok(tx_compose_msg)=>{
                         if let TxCompose::Broadcast(broadcast_data) = tx_compose_msg.inner {
@@ -131,23 +136,28 @@ pub async fn stuffing_tx_monitor_worker<P: Provider<T, Ethereum> + Clone + 'stat
 }
 
 #[derive(Accessor, Consumer)]
-pub struct StuffingTxMonitorActor<P, T> {
+pub struct StuffingTxMonitorActor<P, T, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     #[accessor]
     latest_block: Option<SharedState<LatestBlock>>,
     #[consumer]
-    tx_compose_channel_rx: Option<Broadcaster<MessageTxCompose>>,
+    tx_compose_channel_rx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[consumer]
     market_events_rx: Option<Broadcaster<MarketEvents>>,
     _t: PhantomData<T>,
 }
 
-impl<P: Provider<T, Ethereum> + Send + Sync + Clone + 'static, T: Transport + Clone> StuffingTxMonitorActor<P, T> {
+impl<
+        P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+        T: Transport + Clone,
+        PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
+    > StuffingTxMonitorActor<P, T, PoolEnum>
+{
     pub fn new(client: P) -> Self {
         StuffingTxMonitorActor { client, latest_block: None, tx_compose_channel_rx: None, market_events_rx: None, _t: PhantomData }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self {
             latest_block: Some(bc.latest_block()),
             tx_compose_channel_rx: Some(bc.compose_channel()),
@@ -157,10 +167,11 @@ impl<P: Provider<T, Ethereum> + Send + Sync + Clone + 'static, T: Transport + Cl
     }
 }
 
-impl<P, T> Actor for StuffingTxMonitorActor<P, T>
+impl<P, T, PoolEnum> Actor for StuffingTxMonitorActor<P, T, PoolEnum>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(stuffing_tx_monitor_worker(

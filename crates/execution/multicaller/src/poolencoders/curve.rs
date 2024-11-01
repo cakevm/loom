@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use lazy_static::lazy_static;
+use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use tracing::error;
 
 use loom_types_blockchain::{MulticallerCall, MulticallerCalls};
-use loom_types_entities::PoolWrapper;
+use loom_types_entities::{Pool, PoolEnumTrait, PoolWrapper};
 use loom_types_entities::{PreswapRequirement, SwapAmountType};
 
 use crate::helpers::EncoderHelper;
@@ -28,13 +28,13 @@ impl CurveSwapEncoder {
         *NEED_BALANCE_MAP.get(&address).unwrap_or(&false)
     }
 
-    pub fn encode_swap_in_amount_provided(
+    pub fn encode_swap_in_amount_provided<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
         token_from_address: Address,
         token_to_address: Address,
         amount_in: SwapAmountType,
         swap_opcodes: &mut MulticallerCalls,
-        cur_pool: &PoolWrapper,
-        next_pool: Option<&PoolWrapper>,
+        cur_pool: &PoolWrapper<PoolEnum>,
+        next_pool: Option<&PoolWrapper<PoolEnum>>,
         multicaller: Address,
     ) -> Result<()> {
         let pool_encoder = cur_pool.get_encoder();

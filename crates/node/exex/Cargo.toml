@@ -14,6 +14,7 @@ loom-core-blockchain.workspace = true
 loom-evm-utils.workspace = true
 loom-node-actor-config.workspace = true
 loom-types-blockchain.workspace = true
+loom-types-entities.workspace = true
 loom-types-events.workspace = true
 
 eyre.workspace = true

@@ -15,6 +15,7 @@ loom-core-blockchain.workspace = true
 loom-evm-utils.workspace = true
 loom-node-grpc-exex-proto.workspace = true
 loom-types-blockchain.workspace = true
+loom-types-entities.workspace = true
 loom-types-events.workspace = true
 
 chrono.workspace = true

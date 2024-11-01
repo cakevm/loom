@@ -3,6 +3,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use loom_rpc_state::AppState;
+use loom_types_entities::Pool;
+use std::fmt::{Debug, Display};
 
 /// Get latest block
 ///
@@ -16,7 +18,9 @@ use loom_rpc_state::AppState;
     (status = 200, description = "Todo item created successfully", body = BlockHeader),
     )
 )]
-pub async fn latest_block(State(app_state): State<AppState>) -> Result<Json<BlockHeader>, (StatusCode, String)> {
+pub async fn latest_block<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    State(app_state): State<AppState<PoolEnum>>,
+) -> Result<Json<BlockHeader>, (StatusCode, String)> {
     {
         let block_header_opt = app_state.bc.latest_block().read().await.block_header.clone();
         if let Some(block_header) = block_header_opt {

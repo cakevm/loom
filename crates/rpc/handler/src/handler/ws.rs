@@ -3,18 +3,20 @@ use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     response::IntoResponse,
 };
+use std::fmt::{Debug, Display};
 
 use crate::dto::block::{BlockHeader, WebSocketMessage};
 use loom_rpc_state::AppState;
 use loom_types_blockchain::ChainParameters;
+use loom_types_entities::Pool;
 use std::net::SocketAddr;
 use tracing::{error, warn};
 
 /// Handle websocket upgrade
-pub async fn ws_handler(
+pub async fn ws_handler<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
     ws: WebSocketUpgrade,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(app_state): State<AppState>,
+    State(app_state): State<AppState<PoolEnum>>,
 ) -> impl IntoResponse {
     ws.on_failed_upgrade(move |e| {
         warn!("ws upgrade error: {} with {}", e, addr);
@@ -23,7 +25,11 @@ pub async fn ws_handler(
 }
 
 /// Actual websocket statemachine (one will be spawned per connection)
-async fn on_upgrade(mut socket: WebSocket, _who: SocketAddr, app_state: AppState) {
+async fn on_upgrade<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    mut socket: WebSocket,
+    _who: SocketAddr,
+    app_state: AppState<PoolEnum>,
+) {
     let mut receiver = app_state.bc.new_block_headers_channel().subscribe().await;
 
     while let Ok(header) = receiver.recv().await {

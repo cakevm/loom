@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
 use alloy_primitives::{Address, I256, U256};
@@ -8,32 +8,32 @@ use tracing::error;
 
 use loom_evm_db::LoomDBType;
 
-use crate::{PoolWrapper, PreswapRequirement, SwapAmountType, SwapLine, Token};
+use crate::{Pool, PoolEnumTrait, PoolWrapper, PreswapRequirement, SwapAmountType, SwapLine, Token};
 
 #[derive(Clone, Debug)]
-pub struct SwapStep {
-    swap_line_vec: Vec<SwapLine>,
+pub struct SwapStep<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
+    swap_line_vec: Vec<SwapLine<PoolEnum>>,
     swap_from: Option<Address>,
     swap_to: Address,
 }
 
-impl Display for SwapStep {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Display for SwapStep<PoolEnum> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let paths = self.swap_line_vec.iter().map(|path| format!("{path}")).collect::<Vec<String>>().join(" / ");
         write!(f, "{}", paths)
     }
 }
 
-impl SwapStep {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> SwapStep<PoolEnum> {
     pub fn new(swap_to: Address) -> Self {
         Self { swap_line_vec: Vec::new(), swap_to, swap_from: None }
     }
 
-    pub fn get_mut_swap_line_by_index(&mut self, idx: usize) -> &mut SwapLine {
+    pub fn get_mut_swap_line_by_index(&mut self, idx: usize) -> &mut SwapLine<PoolEnum> {
         &mut self.swap_line_vec[idx]
     }
 
-    pub fn swap_line_vec(&self) -> &Vec<SwapLine> {
+    pub fn swap_line_vec(&self) -> &Vec<SwapLine<PoolEnum>> {
         &self.swap_line_vec
     }
 
@@ -45,7 +45,7 @@ impl SwapStep {
         self.swap_line_vec.is_empty()
     }
 
-    fn first_swap_line(&self) -> Option<&SwapLine> {
+    fn first_swap_line(&self) -> Option<&SwapLine<PoolEnum>> {
         self.swap_line_vec.first()
     }
 
@@ -63,7 +63,7 @@ impl SwapStep {
         }
     }
 
-    pub fn add(&mut self, swap_path: SwapLine) -> &mut Self {
+    pub fn add(&mut self, swap_path: SwapLine<PoolEnum>) -> &mut Self {
         if self.is_empty()
             || ((self.first_token().unwrap() == swap_path.get_first_token().unwrap())
                 && (self.last_token().unwrap() == swap_path.get_last_token().unwrap()))
@@ -116,11 +116,11 @@ impl SwapStep {
         true
     }
 
-    pub fn get_pools(&self) -> Vec<PoolWrapper> {
+    pub fn get_pools(&self) -> Vec<PoolWrapper<PoolEnum>> {
         self.swap_line_vec.iter().flat_map(|sp| sp.pools().clone()).collect()
     }
 
-    fn common_pools(swap_path_0: &SwapLine, swap_path_1: &SwapLine) -> usize {
+    fn common_pools(swap_path_0: &SwapLine<PoolEnum>, swap_path_1: &SwapLine<PoolEnum>) -> usize {
         let mut ret = 0;
         for pool in swap_path_0.pools().iter() {
             if swap_path_1.pools().contains(pool) {
@@ -130,7 +130,11 @@ impl SwapStep {
         ret
     }
 
-    pub fn merge_swap_paths(swap_path_0: SwapLine, swap_path_1: SwapLine, multicaller: Address) -> Result<(SwapStep, SwapStep)> {
+    pub fn merge_swap_paths(
+        swap_path_0: SwapLine<PoolEnum>,
+        swap_path_1: SwapLine<PoolEnum>,
+        multicaller: Address,
+    ) -> Result<(SwapStep<PoolEnum>, SwapStep<PoolEnum>)> {
         let mut split_index_start = 0;
         let mut split_index_end = 0;
 
@@ -426,7 +430,7 @@ impl SwapStep {
 
     }*/
 
-    pub fn profit(swap_step_0: &SwapStep, swap_step_1: &SwapStep) -> I256 {
+    pub fn profit(swap_step_0: &SwapStep<PoolEnum>, swap_step_1: &SwapStep<PoolEnum>) -> I256 {
         let in_amount: I256 = I256::try_from(swap_step_0.get_in_amount().unwrap_or(U256::MAX)).unwrap_or(I256::MAX);
         let out_amount: I256 = I256::try_from(swap_step_1.get_out_amount().unwrap_or(U256::ZERO)).unwrap_or(I256::ZERO);
         if in_amount.is_negative() {
@@ -436,7 +440,7 @@ impl SwapStep {
         }
     }
 
-    pub fn abs_profit(swap_step_0: &SwapStep, swap_step_1: &SwapStep) -> U256 {
+    pub fn abs_profit(swap_step_0: &SwapStep<PoolEnum>, swap_step_1: &SwapStep<PoolEnum>) -> U256 {
         let in_amount: U256 = swap_step_0.get_in_amount().unwrap_or(U256::MAX);
         let out_amount: U256 = swap_step_1.get_out_amount().unwrap_or(U256::ZERO);
         if in_amount >= out_amount {
@@ -446,7 +450,7 @@ impl SwapStep {
         }
     }
 
-    pub fn abs_profit_eth(swap_step_0: &SwapStep, swap_step_1: &SwapStep) -> U256 {
+    pub fn abs_profit_eth(swap_step_0: &SwapStep<PoolEnum>, swap_step_1: &SwapStep<PoolEnum>) -> U256 {
         match swap_step_0.get_first_token() {
             Some(t) => {
                 let profit = Self::abs_profit(swap_step_0, swap_step_1);
@@ -459,10 +463,10 @@ impl SwapStep {
     pub fn optimize_swap_steps(
         state: &LoomDBType,
         env: Env,
-        swap_step_0: &SwapStep,
-        swap_step_1: &SwapStep,
+        swap_step_0: &SwapStep<PoolEnum>,
+        swap_step_1: &SwapStep<PoolEnum>,
         middle_amount: Option<U256>,
-    ) -> Result<(SwapStep, SwapStep)> {
+    ) -> Result<(SwapStep<PoolEnum>, SwapStep<PoolEnum>)> {
         if swap_step_0.can_calculate_in_amount() {
             SwapStep::optimize_with_middle_amount(state, env, swap_step_0, swap_step_1, middle_amount)
         } else {
@@ -473,10 +477,10 @@ impl SwapStep {
     pub fn optimize_with_middle_amount(
         state: &LoomDBType,
         env: Env,
-        swap_step_0: &SwapStep,
-        swap_step_1: &SwapStep,
+        swap_step_0: &SwapStep<PoolEnum>,
+        swap_step_1: &SwapStep<PoolEnum>,
         middle_amount: Option<U256>,
-    ) -> Result<(SwapStep, SwapStep)> {
+    ) -> Result<(SwapStep<PoolEnum>, SwapStep<PoolEnum>)> {
         let mut step_0 = swap_step_0.clone();
         let mut step_1 = swap_step_1.clone();
         let mut best_profit: Option<I256> = None;
@@ -585,7 +589,7 @@ impl SwapStep {
                 }
             }
 
-            let mut best_merged_step_0: Option<SwapStep> = None;
+            let mut best_merged_step_0: Option<SwapStep<PoolEnum>> = None;
 
             for i in 0..step_0.swap_line_vec.len() {
                 let mut merged_step_0 = SwapStep::new(step_0.swap_to);
@@ -597,7 +601,7 @@ impl SwapStep {
                 }
             }
 
-            let mut best_merged_step_1: Option<SwapStep> = None;
+            let mut best_merged_step_1: Option<SwapStep<PoolEnum>> = None;
 
             for i in 0..step_1.swap_line_vec.len() {
                 let mut merged_step_1 = SwapStep::new(step_1.swap_to);
@@ -643,10 +647,10 @@ impl SwapStep {
     pub fn optimize_with_in_amount(
         state: &LoomDBType,
         env: Env,
-        swap_step_0: &SwapStep,
-        swap_step_1: &SwapStep,
+        swap_step_0: &SwapStep<PoolEnum>,
+        swap_step_1: &SwapStep<PoolEnum>,
         in_amount: Option<U256>,
-    ) -> Result<(SwapStep, SwapStep)> {
+    ) -> Result<(SwapStep<PoolEnum>, SwapStep<PoolEnum>)> {
         let mut step_0 = swap_step_0.clone();
         let mut step_1 = swap_step_1.clone();
         let mut best_profit: Option<I256> = None;
@@ -720,7 +724,7 @@ impl SwapStep {
                 }
             }
 
-            let mut best_merged_step_0: Option<SwapStep> = None;
+            let mut best_merged_step_0: Option<SwapStep<PoolEnum>> = None;
 
             for i in 0..step_0.swap_line_vec.len() {
                 let mut merged_step_0 = SwapStep::new(step_0.swap_to);
@@ -758,7 +762,7 @@ impl SwapStep {
                 }
             }
 
-            let mut best_merged_step_1: Option<SwapStep> = None;
+            let mut best_merged_step_1: Option<SwapStep<PoolEnum>> = None;
 
             for i in 0..step_1.swap_line_vec.len() {
                 let mut merged_step_1 = SwapStep::new(step_1.swap_to);

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
-use crate::{Swap, Token};
+use crate::{Pool, PoolEnumTrait, Swap, Token};
 use alloy_primitives::utils::format_units;
 use alloy_primitives::{Address, U256};
 use eyre::{eyre, OptionExt, Result};
@@ -61,8 +61,8 @@ pub fn randomize_tips_pct(tips_pct: u32) -> u32 {
     tips_pct - rnd
 }
 
-pub fn tips_and_value_for_swap_type(
-    swap: &Swap,
+pub fn tips_and_value_for_swap_type<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    swap: &Swap<PoolEnum>,
     tips_pct: Option<u32>,
     gas_cost: Option<U256>,
     eth_balance: U256,

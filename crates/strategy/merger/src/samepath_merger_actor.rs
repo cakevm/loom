@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -27,15 +28,17 @@ use loom_evm_utils::evm::evm_transact;
 use loom_evm_utils::evm_tx_env::tx_to_evm_tx;
 use loom_node_debug_provider::DebugProviderExt;
 use loom_types_blockchain::{debug_trace_call_pre_state, GethStateUpdate, GethStateUpdateVec, TRACING_CALL_OPTS};
-use loom_types_entities::{DataFetcher, FetchState, LatestBlock, MarketState, Swap};
+use loom_types_entities::{DataFetcher, FetchState, LatestBlock, MarketState, Pool, PoolEnumTrait, Swap};
 use loom_types_events::{MarketEvents, MessageTxCompose, TxCompose, TxComposeData};
 
 lazy_static! {
     static ref COINBASE: Address = "0x1f9090aaE28b8a3dCeaDf281B0F12828e676c326".parse().unwrap();
 }
 
-fn get_merge_list<'a>(request: &TxComposeData, swap_paths: &'a HashMap<TxHash, Vec<TxComposeData>>) -> Vec<&'a TxComposeData> {
-    //let mut ret : Vec<&TxComposeData> = Vec::new();
+fn get_merge_list<'a, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    request: &TxComposeData<PoolEnum>,
+    swap_paths: &'a HashMap<TxHash, Vec<TxComposeData<PoolEnum>>>,
+) -> Vec<&'a TxComposeData<PoolEnum>> {
     let swap_line = if let Swap::BackrunSwapLine(swap_line) = &request.swap {
         swap_line
     } else {
@@ -44,7 +47,7 @@ fn get_merge_list<'a>(request: &TxComposeData, swap_paths: &'a HashMap<TxHash, V
 
     let swap_stuffing_hash = request.first_stuffing_hash();
 
-    let mut ret: Vec<&TxComposeData> = swap_paths
+    let mut ret: Vec<&TxComposeData<PoolEnum>> = swap_paths
         .iter()
         .filter_map(|(k, v)| {
             if *k != swap_stuffing_hash {
@@ -60,19 +63,20 @@ fn get_merge_list<'a>(request: &TxComposeData, swap_paths: &'a HashMap<TxHash, V
     ret
 }
 
-async fn same_path_merger_task<P, T, N>(
+async fn same_path_merger_task<P, T, N, PoolEnum>(
     client: P,
     stuffing_txes: Vec<Transaction>,
     pre_states: Arc<RwLock<DataFetcher<TxHash, GethStateUpdate>>>,
     market_state: SharedState<MarketState>,
     call_opts: GethDebugTracingCallOptions,
-    request: TxComposeData,
-    swap_request_tx: Broadcaster<MessageTxCompose>,
+    request: TxComposeData<PoolEnum>,
+    swap_request_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
 ) -> Result<()>
 where
     N: Network,
     T: Transport + Clone,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     debug!("same_path_merger_task stuffing_txs len {}", stuffing_txes.len());
 
@@ -233,18 +237,19 @@ async fn same_path_merger_worker<
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 >(
     client: P,
     latest_block: SharedState<LatestBlock>,
     market_state: SharedState<MarketState>,
     market_events_rx: Broadcaster<MarketEvents>,
-    compose_channel_rx: Broadcaster<MessageTxCompose>,
-    compose_channel_tx: Broadcaster<MessageTxCompose>,
+    compose_channel_rx: Broadcaster<MessageTxCompose<PoolEnum>>,
+    compose_channel_tx: Broadcaster<MessageTxCompose<PoolEnum>>,
 ) -> WorkerResult {
     subscribe!(market_events_rx);
     subscribe!(compose_channel_rx);
 
-    let mut swap_paths: HashMap<TxHash, Vec<TxComposeData>> = HashMap::new();
+    let mut swap_paths: HashMap<TxHash, Vec<TxComposeData<PoolEnum>>> = HashMap::new();
 
     let prestate = Arc::new(RwLock::new(DataFetcher::<TxHash, GethStateUpdate>::new()));
 
@@ -286,7 +291,7 @@ async fn same_path_merger_worker<
 
 
             msg = compose_channel_rx.recv() => {
-                let msg : Result<MessageTxCompose, RecvError> = msg;
+                let msg : Result<MessageTxCompose<PoolEnum>, RecvError> = msg;
                 match msg {
                     Ok(compose_request)=>{
                         if let TxCompose::Sign(sign_request) = compose_request.inner() {
@@ -345,7 +350,7 @@ async fn same_path_merger_worker<
 }
 
 #[derive(Consumer, Producer, Accessor)]
-pub struct SamePathMergerActor<P, T, N> {
+pub struct SamePathMergerActor<P, T, N, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     //encoder: SwapStepEncoder,
     #[accessor]
@@ -355,18 +360,19 @@ pub struct SamePathMergerActor<P, T, N> {
     #[consumer]
     market_events: Option<Broadcaster<MarketEvents>>,
     #[consumer]
-    compose_channel_rx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_rx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[producer]
-    compose_channel_tx: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel_tx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     _t: PhantomData<T>,
     _n: PhantomData<N>,
 }
 
-impl<P, T, N> SamePathMergerActor<P, T, N>
+impl<P, T, N, PoolEnum> SamePathMergerActor<P, T, N, PoolEnum>
 where
     N: Network,
     T: Transport + Clone,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     pub fn new(client: P) -> Self {
         Self {
@@ -381,7 +387,7 @@ where
         }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self {
             market_state: Some(bc.market_state()),
             latest_block: Some(bc.latest_block()),
@@ -393,11 +399,12 @@ where
     }
 }
 
-impl<P, T, N> Actor for SamePathMergerActor<P, T, N>
+impl<P, T, N, PoolEnum> Actor for SamePathMergerActor<P, T, N, PoolEnum>
 where
     N: Network,
     T: Transport + Clone,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(same_path_merger_worker(

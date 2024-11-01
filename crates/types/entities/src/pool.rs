@@ -125,61 +125,61 @@ impl Display for PoolProtocol {
     }
 }
 
-pub struct PoolWrapper {
-    pub pool: Arc<dyn Pool>,
+pub struct PoolWrapper<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
+    pub pool: Arc<PoolEnum>,
 }
 
-impl PartialOrd for PoolWrapper {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> PartialOrd for PoolWrapper<PoolEnum> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Eq for PoolWrapper {}
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Eq for PoolWrapper<PoolEnum> {}
 
-impl Ord for PoolWrapper {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Ord for PoolWrapper<PoolEnum> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.get_address().cmp(&other.get_address())
     }
 }
 
-impl Display for PoolWrapper {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Display for PoolWrapper<PoolEnum> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}@{:?}", self.get_protocol(), self.get_address())
     }
 }
 
-impl Debug for PoolWrapper {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Debug for PoolWrapper<PoolEnum> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}@{:?}", self.get_protocol(), self.get_address())
     }
 }
 
-impl Hash for PoolWrapper {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Hash for PoolWrapper<PoolEnum> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.get_address().hash(state)
     }
 }
 
-impl PartialEq for PoolWrapper {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> PartialEq for PoolWrapper<PoolEnum> {
     fn eq(&self, other: &Self) -> bool {
         self.pool.get_address() == other.pool.get_address()
     }
 }
 
-impl PoolWrapper {
-    pub fn new(pool: Arc<dyn Pool>) -> Self {
-        PoolWrapper { pool }
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> PoolWrapper<PoolEnum> {
+    pub fn new(pool: PoolEnum) -> Self {
+        PoolWrapper { pool: Arc::new(pool) }
     }
 }
 
-impl Clone for PoolWrapper {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Clone for PoolWrapper<PoolEnum> {
     fn clone(&self) -> Self {
         Self { pool: self.pool.clone() }
     }
 }
 
-impl Deref for PoolWrapper {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Deref for PoolWrapper<PoolEnum> {
     type Target = dyn Pool;
 
     fn deref(&self) -> &Self::Target {
@@ -187,13 +187,22 @@ impl Deref for PoolWrapper {
     }
 }
 
-impl<T: 'static + Pool + Clone> From<T> for PoolWrapper {
-    fn from(pool: T) -> Self {
-        Self { pool: Arc::new(pool) }
+impl<P: 'static + Pool + Clone, PoolEnum: From<P> + PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> From<P>
+    for PoolWrapper<PoolEnum>
+{
+    fn from(pool: P) -> Self {
+        Self { pool: Arc::new(PoolEnum::from(pool)) }
     }
 }
 
-pub trait Pool: Sync + Send {
+pub trait PoolEnumTrait {
+    fn try_from_pool(pool: &(impl Pool)) -> Result<Self>
+    where
+        Self: Sized;
+}
+
+#[enum_delegate::register]
+pub trait Pool {
     fn get_class(&self) -> PoolClass {
         PoolClass::Unknown
     }

@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -13,18 +14,23 @@ use loom_core_blockchain::Blockchain;
 use loom_defi_pools::protocols::CurveProtocol;
 use loom_defi_pools::CurvePool;
 use loom_node_debug_provider::DebugProviderExt;
-use loom_types_entities::{Market, MarketState, PoolWrapper};
+use loom_types_entities::{Market, MarketState, Pool, PoolEnumTrait, PoolWrapper};
 
-async fn curve_pool_loader_worker<P, T, N>(client: P, market: SharedState<Market>, market_state: SharedState<MarketState>) -> WorkerResult
+async fn curve_pool_loader_worker<P, T, N, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    client: P,
+    market: SharedState<Market<PoolEnum>>,
+    market_state: SharedState<MarketState>,
+) -> WorkerResult
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     let curve_contracts = CurveProtocol::get_contracts_vec(client.clone());
     for curve_contract in curve_contracts.into_iter() {
         if let Ok(curve_pool) = CurvePool::fetch_pool_data(client.clone(), curve_contract).await {
-            let pool_wrapped = PoolWrapper::new(Arc::new(curve_pool));
+            let pool_wrapped = PoolWrapper::new(curve_pool.into());
             match fetch_state_and_add_pool(client.clone(), market.clone(), market_state.clone(), pool_wrapped.clone()).await {
                 Err(e) => {
                     error!("Curve pool loading error : {}", e)
@@ -81,36 +87,38 @@ where
 }
 
 #[derive(Accessor, Consumer)]
-pub struct CurvePoolLoaderOneShotActor<P, T, N> {
+pub struct CurvePoolLoaderOneShotActor<P, T, N, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     #[accessor]
-    market: Option<SharedState<Market>>,
+    market: Option<SharedState<Market<PoolEnum>>>,
     #[accessor]
     market_state: Option<SharedState<MarketState>>,
     _t: PhantomData<T>,
     _n: PhantomData<N>,
 }
 
-impl<P, T, N> CurvePoolLoaderOneShotActor<P, T, N>
+impl<P, T, N, PoolEnum> CurvePoolLoaderOneShotActor<P, T, N, PoolEnum>
 where
     N: Network,
     T: Transport + Clone,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     pub fn new(client: P) -> Self {
         Self { client, market: None, market_state: None, _n: PhantomData, _t: PhantomData }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { market: Some(bc.market()), market_state: Some(bc.market_state()), ..self }
     }
 }
 
-impl<P, T, N> Actor for CurvePoolLoaderOneShotActor<P, T, N>
+impl<P, T, N, PoolEnum> Actor for CurvePoolLoaderOneShotActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(curve_pool_loader_worker(

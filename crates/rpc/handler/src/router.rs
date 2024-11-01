@@ -6,31 +6,36 @@ use crate::openapi::ApiDoc;
 use axum::routing::{get, post};
 use axum::Router;
 use loom_rpc_state::AppState;
+use loom_types_entities::Pool;
+use std::fmt::{Debug, Display};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-pub fn router(app_state: AppState) -> Router<()> {
+pub fn router<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    app_state: AppState<PoolEnum>,
+) -> Router<()> {
     Router::new()
         .nest(
             "/api/v1",
             Router::new()
-                .nest("/block", router_block()) // rename to node
-                .nest("/markets", router_market())
-                .nest("/flashbots", Router::new().route("/", post(flashbots))),
+                .nest("/block", router_block::<PoolEnum>()) // rename to node
+                .nest("/markets", router_market::<PoolEnum>())
+                .nest("/flashbots", Router::new().route("/", post(flashbots::<PoolEnum>))),
         )
-        .route("/ws", get(ws_handler))
+        .route("/ws", get(ws_handler::<PoolEnum>))
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .with_state(app_state)
 }
 
-pub fn router_block() -> Router<AppState> {
-    Router::new().route("/latest_block", get(latest_block))
+pub fn router_block<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>() -> Router<AppState<PoolEnum>> {
+    Router::new().route("/latest_block", get(latest_block::<PoolEnum>))
 }
 
-pub fn router_market() -> Router<AppState> {
+pub fn router_market<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>() -> Router<AppState<PoolEnum>>
+{
     Router::new()
-        .route("/pools/:address", get(pool))
-        .route("/pools/:address/quote", post(pool_quote))
-        .route("/pools", get(pools))
-        .route("/", get(market_stats))
+        .route("/pools/:address", get(pool::<PoolEnum>))
+        .route("/pools/:address/quote", post(pool_quote::<PoolEnum>))
+        .route("/pools", get(pools::<PoolEnum>))
+        .route("/", get(market_stats::<PoolEnum>))
 }

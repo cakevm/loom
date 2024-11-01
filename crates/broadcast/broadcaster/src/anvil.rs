@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 
 use alloy_eips::BlockNumberOrTag;
@@ -14,13 +15,15 @@ use loom_core_actors::{Actor, ActorResult, Broadcaster, Consumer, WorkerResult};
 use loom_core_actors_macros::{Accessor, Consumer};
 use loom_core_blockchain::Blockchain;
 use loom_node_debug_provider::AnvilProviderExt;
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::{MessageTxCompose, TxCompose, TxComposeData};
 
-async fn broadcast_task<P, T, N>(client: P, request: TxComposeData) -> Result<()>
+async fn broadcast_task<P, T, N, PoolEnum>(client: P, request: TxComposeData<PoolEnum>) -> Result<()>
 where
     N: Network,
     T: Transport + Clone,
     P: Provider<T, N> + AnvilProviderExt<T, N> + Clone + Send + Sync + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     info!("Hardhat broadcast request received : {}", request.origin.unwrap_or("UNKNOWN_ORIGIN".to_string()));
     //let snap = client.dev_rpc().snapshot().await?;
@@ -43,17 +46,18 @@ where
     Ok(())
 }
 
-async fn anvil_broadcaster_worker<P, T>(client: P, bundle_rx: Broadcaster<MessageTxCompose>) -> WorkerResult
+async fn anvil_broadcaster_worker<P, T, PoolEnum>(client: P, bundle_rx: Broadcaster<MessageTxCompose<PoolEnum>>) -> WorkerResult
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + AnvilProviderExt<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
-    let mut bundle_rx: Receiver<MessageTxCompose> = bundle_rx.subscribe().await;
+    let mut bundle_rx: Receiver<MessageTxCompose<PoolEnum>> = bundle_rx.subscribe().await;
 
     loop {
         tokio::select! {
             msg = bundle_rx.recv() => {
-                let broadcast_msg : Result<MessageTxCompose, RecvError> = msg;
+                let broadcast_msg : Result<MessageTxCompose<PoolEnum>, RecvError> = msg;
                 match broadcast_msg {
                     Ok(compose_request) => {
                         if let TxCompose::Broadcast(broadcast_request) = compose_request.inner {
@@ -86,31 +90,33 @@ where
 }
 
 #[derive(Accessor, Consumer)]
-pub struct AnvilBroadcastActor<P, T> {
+pub struct AnvilBroadcastActor<P, T, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     #[consumer]
-    tx_compose_rx: Option<Broadcaster<MessageTxCompose>>,
+    tx_compose_rx: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     _t: PhantomData<T>,
 }
 
-impl<P, T> AnvilBroadcastActor<P, T>
+impl<P, T, PoolEnum> AnvilBroadcastActor<P, T, PoolEnum>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + AnvilProviderExt<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
-    pub fn new(client: P) -> AnvilBroadcastActor<P, T> {
+    pub fn new(client: P) -> AnvilBroadcastActor<P, T, PoolEnum> {
         Self { client, tx_compose_rx: None, _t: PhantomData }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { tx_compose_rx: Some(bc.compose_channel()), ..self }
     }
 }
 
-impl<P, T> Actor for AnvilBroadcastActor<P, T>
+impl<P, T, PoolEnum> Actor for AnvilBroadcastActor<P, T, PoolEnum>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + AnvilProviderExt<T, Ethereum> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(anvil_broadcaster_worker(self.client.clone(), self.tx_compose_rx.clone().unwrap()));

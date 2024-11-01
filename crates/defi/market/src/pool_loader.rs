@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -19,12 +20,12 @@ use loom_defi_pools::protocols::{fetch_uni2_factory, fetch_uni3_factory, CurvePr
 use loom_defi_pools::{CurvePool, MaverickPool, PancakeV3Pool, UniswapV2Pool, UniswapV3Pool};
 use loom_node_debug_provider::DebugProviderExt;
 use loom_types_entities::required_state::RequiredStateReader;
-use loom_types_entities::{get_protocol_by_factory, Market, MarketState, PoolClass, PoolProtocol, PoolWrapper};
+use loom_types_entities::{get_protocol_by_factory, Market, MarketState, Pool, PoolClass, PoolEnumTrait, PoolProtocol, PoolWrapper};
 use loom_types_events::Task;
 
-pub async fn pool_loader_worker<P, T, N>(
+pub async fn pool_loader_worker<P, T, N, PoolEnum>(
     client: P,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     market_state: SharedState<MarketState>,
     tasks_rx: Broadcaster<Task>,
 ) -> WorkerResult
@@ -32,6 +33,7 @@ where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     let mut fetch_tasks = FuturesUnordered::new();
     let mut processed_pools = HashMap::new();
@@ -68,9 +70,9 @@ where
 }
 
 /// Fetch pool data, add it to the market and fetch the required state
-pub async fn fetch_and_add_pool_by_address<P, T, N>(
+pub async fn fetch_and_add_pool_by_address<P, T, N, PoolEnum>(
     client: P,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     market_state: SharedState<MarketState>,
     pool_address: Address,
     pool_class: PoolClass,
@@ -79,6 +81,7 @@ where
     N: Network,
     T: Transport + Clone,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     debug!("Fetching pool {:#20x}", pool_address);
 
@@ -106,12 +109,14 @@ where
                 Ok(factory_address) => {
                     let pool_wrapped = match get_protocol_by_factory(factory_address) {
                         PoolProtocol::PancakeV3 => {
-                            PoolWrapper::new(Arc::new(PancakeV3Pool::fetch_pool_data(client.clone(), pool_address).await?))
+                            PoolWrapper::new(Arc::new(PoolEnum::from(PancakeV3Pool::fetch_pool_data(client.clone(), pool_address).await?)))
                         }
                         PoolProtocol::Maverick => {
-                            PoolWrapper::new(Arc::new(MaverickPool::fetch_pool_data(client.clone(), pool_address).await?))
+                            PoolWrapper::new(Arc::new(PoolEnum::from(MaverickPool::fetch_pool_data(client.clone(), pool_address).await?)))
                         }
-                        _ => PoolWrapper::new(Arc::new(UniswapV3Pool::fetch_pool_data(client.clone(), pool_address).await?)),
+                        _ => {
+                            PoolWrapper::new(Arc::new(PoolEnum::from(UniswapV3Pool::fetch_pool_data(client.clone(), pool_address).await?)))
+                        }
                     };
 
                     if let Err(e) = fetch_state_and_add_pool(client, market, market_state, pool_wrapped).await {
@@ -150,16 +155,17 @@ where
     Ok(())
 }
 
-pub async fn fetch_state_and_add_pool<P, T, N>(
+pub async fn fetch_state_and_add_pool<P, T, N, PoolEnum>(
     client: P,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     market_state: SharedState<MarketState>,
-    pool_wrapped: PoolWrapper,
+    pool_wrapped: PoolWrapper<PoolEnum>,
 ) -> Result<()>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     match pool_wrapped.get_state_required() {
         Ok(required_state) => match RequiredStateReader::fetch_calls_and_slots(client, required_state, None).await {
@@ -175,7 +181,7 @@ where
                 }
 
                 let directions_vec = pool_wrapped.get_swap_directions();
-                let mut directions_tree: BTreeMap<PoolWrapper, Vec<(Address, Address)>> = BTreeMap::new();
+                let mut directions_tree: BTreeMap<PoolWrapper<PoolEnum>, Vec<(Address, Address)>> = BTreeMap::new();
 
                 directions_tree.insert(pool_wrapped.clone(), directions_vec);
 
@@ -203,10 +209,10 @@ where
 }
 
 #[derive(Accessor, Consumer)]
-pub struct PoolLoaderActor<P, T, N> {
+pub struct PoolLoaderActor<P, T, N, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     #[accessor]
-    market: Option<SharedState<Market>>,
+    market: Option<SharedState<Market<PoolEnum>>>,
     #[accessor]
     market_state: Option<SharedState<MarketState>>,
     #[consumer]
@@ -215,26 +221,28 @@ pub struct PoolLoaderActor<P, T, N> {
     _n: PhantomData<N>,
 }
 
-impl<P, T, N> PoolLoaderActor<P, T, N>
+impl<P, T, N, PoolEnum> PoolLoaderActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     pub fn new(client: P) -> Self {
         Self { client, market: None, market_state: None, tasks_rx: None, _t: PhantomData, _n: PhantomData }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self { market: Some(bc.market()), market_state: Some(bc.market_state()), tasks_rx: Some(bc.tasks_channel()), ..self }
     }
 }
 
-impl<P, T, N> Actor for PoolLoaderActor<P, T, N>
+impl<P, T, N, PoolEnum> Actor for PoolLoaderActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let task = tokio::task::spawn(pool_loader_worker(

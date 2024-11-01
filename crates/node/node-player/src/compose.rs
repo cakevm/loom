@@ -1,11 +1,16 @@
 use loom_core_actors::{Broadcaster, SharedState, WorkerResult};
 use loom_evm_utils::reth_types::decode_into_transaction;
 use loom_types_blockchain::Mempool;
+use loom_types_entities::Pool;
 use loom_types_events::{MessageTxCompose, RlpState, TxCompose};
+use std::fmt::{Debug, Display};
 use tokio::select;
 use tracing::{error, info};
 
-pub(crate) async fn replayer_compose_worker(mempool: SharedState<Mempool>, compose_channel: Broadcaster<MessageTxCompose>) -> WorkerResult {
+pub async fn replayer_compose_worker<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+    mempool: SharedState<Mempool>,
+    compose_channel: Broadcaster<MessageTxCompose<PoolEnum>>,
+) -> WorkerResult {
     let mut compose_channel_rx = compose_channel.subscribe().await;
 
     loop {

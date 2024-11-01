@@ -4,17 +4,18 @@ use influxdb::WriteQuery;
 use loom_core_actors::{Broadcaster, SharedState};
 use loom_defi_address_book::TokenAddress;
 use loom_types_blockchain::{ChainParameters, Mempool};
-use loom_types_entities::{AccountNonceAndBalanceState, BlockHistory, LatestBlock, Market, MarketState, Token};
+use loom_types_entities::{AccountNonceAndBalanceState, BlockHistory, LatestBlock, Market, MarketState, Pool, PoolEnumTrait, Token};
 use loom_types_events::{
     MarketEvents, MempoolEvents, MessageBlock, MessageBlockHeader, MessageBlockLogs, MessageBlockStateUpdate, MessageHealthEvent,
     MessageMempoolDataUpdate, MessageTxCompose, StateUpdateEvent, Task,
 };
+use std::fmt::{Debug, Display};
 
 #[derive(Clone)]
-pub struct Blockchain {
+pub struct Blockchain<PoolEnum: PoolEnumTrait + PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     chain_id: ChainId,
     chain_parameters: ChainParameters,
-    market: SharedState<Market>,
+    market: SharedState<Market<PoolEnum>>,
     latest_block: SharedState<LatestBlock>,
     market_state: SharedState<MarketState>,
     block_history_state: SharedState<BlockHistory>,
@@ -29,14 +30,14 @@ pub struct Blockchain {
     market_events_channel: Broadcaster<MarketEvents>,
     mempool_events_channel: Broadcaster<MempoolEvents>,
     pool_health_monitor_channel: Broadcaster<MessageHealthEvent>,
-    compose_channel: Broadcaster<MessageTxCompose>,
-    state_update_channel: Broadcaster<StateUpdateEvent>,
+    compose_channel: Broadcaster<MessageTxCompose<PoolEnum>>,
+    state_update_channel: Broadcaster<StateUpdateEvent<PoolEnum>>,
     influxdb_write_channel: Broadcaster<WriteQuery>,
     tasks_channel: Broadcaster<Task>,
 }
 
-impl Blockchain {
-    pub fn new(chain_id: ChainId) -> Blockchain {
+impl<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> Blockchain<PoolEnum> {
+    pub fn new(chain_id: ChainId) -> Blockchain<PoolEnum> {
         let new_block_headers_channel: Broadcaster<MessageBlockHeader> = Broadcaster::new(10);
         let new_block_with_tx_channel: Broadcaster<MessageBlock> = Broadcaster::new(10);
         let new_block_state_update_channel: Broadcaster<MessageBlockStateUpdate> = Broadcaster::new(10);
@@ -47,12 +48,12 @@ impl Blockchain {
         let market_events_channel: Broadcaster<MarketEvents> = Broadcaster::new(100);
         let mempool_events_channel: Broadcaster<MempoolEvents> = Broadcaster::new(2000);
         let pool_health_monitor_channel: Broadcaster<MessageHealthEvent> = Broadcaster::new(1000);
-        let compose_channel: Broadcaster<MessageTxCompose> = Broadcaster::new(100);
-        let state_update_channel: Broadcaster<StateUpdateEvent> = Broadcaster::new(100);
+        let compose_channel: Broadcaster<MessageTxCompose<PoolEnum>> = Broadcaster::new(100);
+        let state_update_channel: Broadcaster<StateUpdateEvent<PoolEnum>> = Broadcaster::new(100);
         let influx_write_channel: Broadcaster<WriteQuery> = Broadcaster::new(1000);
         let tasks_channel: Broadcaster<Task> = Broadcaster::new(1000);
 
-        let mut market_instance = Market::default();
+        let mut market_instance = Market::<PoolEnum>::default();
 
         let weth_token = Token::new_with_data(TokenAddress::WETH, Some("WETH".to_string()), None, Some(18), true, false);
         let usdc_token = Token::new_with_data(TokenAddress::USDC, Some("USDC".to_string()), None, Some(6), true, false);
@@ -92,7 +93,7 @@ impl Blockchain {
         }
     }
 
-    pub fn with_market_state(&self, market_state: MarketState) -> Blockchain {
+    pub fn with_market_state(&self, market_state: MarketState) -> Blockchain<PoolEnum> {
         Blockchain { market_state: SharedState::new(market_state), ..self.clone() }
     }
 
@@ -104,7 +105,7 @@ impl Blockchain {
         self.chain_parameters.clone()
     }
 
-    pub fn market(&self) -> SharedState<Market> {
+    pub fn market(&self) -> SharedState<Market<PoolEnum>> {
         self.market.clone()
     }
 
@@ -159,11 +160,11 @@ impl Blockchain {
         self.pool_health_monitor_channel.clone()
     }
 
-    pub fn compose_channel(&self) -> Broadcaster<MessageTxCompose> {
+    pub fn compose_channel(&self) -> Broadcaster<MessageTxCompose<PoolEnum>> {
         self.compose_channel.clone()
     }
 
-    pub fn state_update_channel(&self) -> Broadcaster<StateUpdateEvent> {
+    pub fn state_update_channel(&self) -> Broadcaster<StateUpdateEvent<PoolEnum>> {
         self.state_update_channel.clone()
     }
 

@@ -1,10 +1,11 @@
-use std::any::type_name;
-
 use crate::node_exex_worker::node_exex_grpc_worker;
 use loom_core_actors::{Actor, ActorResult, Broadcaster, Producer};
 use loom_core_actors_macros::Producer;
 use loom_core_blockchain::Blockchain;
+use loom_types_entities::{Pool, PoolEnumTrait};
 use loom_types_events::{MessageBlock, MessageBlockHeader, MessageBlockLogs, MessageBlockStateUpdate, MessageMempoolDataUpdate};
+use std::any::type_name;
+use std::fmt::{Debug, Display};
 
 #[derive(Producer)]
 pub struct NodeExExGrpcActor {
@@ -33,7 +34,10 @@ impl NodeExExGrpcActor {
         }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc<PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static>(
+        self,
+        bc: &Blockchain<PoolEnum>,
+    ) -> Self {
         Self {
             block_header_channel: Some(bc.new_block_headers_channel()),
             block_with_tx_channel: Some(bc.new_block_with_tx_channel()),

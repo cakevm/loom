@@ -1,4 +1,5 @@
 use std::any::type_name;
+use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 
 use crate::compose::replayer_compose_worker;
@@ -12,12 +13,12 @@ use loom_core_actors_macros::{Accessor, Consumer, Producer};
 use loom_core_blockchain::Blockchain;
 use loom_node_debug_provider::{DebugProviderExt, HttpCachedTransport};
 use loom_types_blockchain::Mempool;
-use loom_types_entities::MarketState;
+use loom_types_entities::{MarketState, Pool, PoolEnumTrait};
 use loom_types_events::{MessageBlock, MessageBlockHeader, MessageBlockLogs, MessageBlockStateUpdate, MessageTxCompose};
 use tokio::task::JoinHandle;
 
 #[derive(Producer, Consumer, Accessor)]
-pub struct NodeBlockPlayerActor<P, T, N> {
+pub struct NodeBlockPlayerActor<P, T, N, PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static> {
     client: P,
     start_block: BlockNumber,
     end_block: BlockNumber,
@@ -26,7 +27,7 @@ pub struct NodeBlockPlayerActor<P, T, N> {
     #[accessor]
     market_state: Option<SharedState<MarketState>>,
     #[consumer]
-    compose_channel: Option<Broadcaster<MessageTxCompose>>,
+    compose_channel: Option<Broadcaster<MessageTxCompose<PoolEnum>>>,
     #[producer]
     block_header_channel: Option<Broadcaster<MessageBlockHeader>>,
     #[producer]
@@ -39,13 +40,14 @@ pub struct NodeBlockPlayerActor<P, T, N> {
     _n: PhantomData<N>,
 }
 
-impl<P, T, N> NodeBlockPlayerActor<P, T, N>
+impl<P, T, N, PoolEnum> NodeBlockPlayerActor<P, T, N, PoolEnum>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N> + DebugProviderExt<T, N> + Send + Sync + Clone + 'static,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
-    pub fn new(client: P, start_block: BlockNumber, end_block: BlockNumber) -> NodeBlockPlayerActor<P, T, N> {
+    pub fn new(client: P, start_block: BlockNumber, end_block: BlockNumber) -> NodeBlockPlayerActor<P, T, N, PoolEnum> {
         NodeBlockPlayerActor {
             client,
             start_block,
@@ -62,7 +64,7 @@ where
         }
     }
 
-    pub fn on_bc(self, bc: &Blockchain) -> Self {
+    pub fn on_bc(self, bc: &Blockchain<PoolEnum>) -> Self {
         Self {
             mempool: Some(bc.mempool()),
             market_state: Some(bc.market_state()),
@@ -76,11 +78,12 @@ where
     }
 }
 
-impl<P, T, N> Actor for NodeBlockPlayerActor<P, T, N>
+impl<P, T, N, PoolEnum> Actor for NodeBlockPlayerActor<P, T, N, PoolEnum>
 where
     P: Provider<HttpCachedTransport, Ethereum> + DebugProviderExt<HttpCachedTransport, Ethereum> + Send + Sync + Clone + 'static,
     T: Send + Sync,
     N: Send + Sync,
+    PoolEnum: PoolEnumTrait + Pool + Clone + Eq + Send + Sync + Display + Debug + 'static,
 {
     fn start(&self) -> ActorResult {
         let mut handles: Vec<JoinHandle<WorkerResult>> = Vec::new();

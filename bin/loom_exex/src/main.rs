@@ -13,9 +13,13 @@ use reth::builder::engine_tree_config::TreeConfig;
 use reth::builder::EngineNodeLauncher;
 use reth::chainspec::{Chain, EthereumChainSpecParser};
 use reth::cli::Cli;
+use reth::revm::database::StateProviderDatabase;
+use reth::revm::db::CacheDB;
+use reth::rpc::server_types::eth::cache::db::StateProviderTraitObjWrapper;
 use reth_node_ethereum::node::EthereumAddOns;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::providers::BlockchainProvider2;
+use reth_provider::{DatabaseProviderFactory, StateProviderFactory};
 use std::time::Duration;
 use tokio::{signal, task};
 use tracing::{error, info};
@@ -54,9 +58,23 @@ fn main() -> eyre::Result<()> {
                 })
                 .await?;
 
+            /*
+            Old engine, used for auto-completion in IDE
+            let handle = builder
+                .node(EthereumNode::default())
+                .install_exex("pine-exex", |node_ctx| {
+                    loom_runtime::init(node_ctx, bc_clone, NodeBlockActorConfig::all_disabled().with_block_header().with_block_with_tx())
+                })
+                .launch()
+                .await?;
+            */
+
             let mempool = handle.node.pool.clone();
             let ipc_provider = ProviderBuilder::new().on_builtin(handle.node.config.rpc.ipcpath.as_str()).await?;
             let alloy_db = AlloyDB::new(ipc_provider.clone(), BlockId::latest()).unwrap();
+
+            let state = handle.node.provider.state_by_block_id(BlockId::latest())?;
+            let mut db = CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
             let state_db = LoomDB::new().with_ext_db(alloy_db);
             let bc = bc.with_market_state(MarketState::new(state_db));
